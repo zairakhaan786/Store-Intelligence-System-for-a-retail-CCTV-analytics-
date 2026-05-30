@@ -1,0 +1,92 @@
+# ──────────────────────────────────────────────────────────────
+# Store Intelligence System — .gitignore
+# ──────────────────────────────────────────────────────────────
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+ENV/
+
+# Environment files (keep example, ignore actual)
+.env
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.log
+
+# Docker
+.docker/
+
+# Node / Frontend
+src/gallery/node_modules/
+src/gallery/dist/
+src/gallery/.vite/
+src/gallery/.cache/
+
+# Data files — DO NOT UPLOAD
+data/*.csv
+data/*.mp4
+data/*.avi
+data/*.mkv
+data/*.mov
+data/videos/
+data/raw/
+
+# Model weights (large files)
+*.pt
+*.pth
+*.onnx
+*.caffemodel
+
+# Face detector models
+data/face_detector/*.caffemodel
+data/face_detector/*.prototxt
+
+# Logs
+logs/
+*.log
+
+# Temporary
+tmp/
+temp/
+scratch/
+
+# Database
+*.db
+*.sqlite3
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+.AppleDouble
+.LSOverride

@@ -50,9 +50,16 @@ async def list_gesture_events(
             {**params, "limit": page_size, "offset": (page - 1) * page_size},
         ).fetchall()
 
+        import json
         gestures = []
         for r in rows:
-            meta = r.metadata or {}
+            meta = r.metadata
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            meta = meta or {}
             gestures.append({
                 "id": str(r.id),
                 "timestamp": r.timestamp.isoformat() if r.timestamp else None,

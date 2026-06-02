@@ -30,7 +30,7 @@ class EventOut(BaseModel):
     frame_number: Optional[int]
     confidence: Optional[float]
     bbox: Optional[Dict[str, float]]
-    metadata: Optional[Dict[str, Any]] = Field(default=None, validation_alias=AliasChoices("metadata", "metadata_dict"))
+    metadata_dict: Optional[Dict[str, Any]] = Field(default=None, serialization_alias="metadata", validation_alias=AliasChoices("metadata_dict", "metadata"))
 
     model_config = {"from_attributes": True}
 
@@ -104,7 +104,7 @@ class AnomalyOut(BaseModel):
     zone_id: Optional[str]
     track_id: Optional[str]
     description: Optional[str]
-    metadata: Optional[Dict[str, Any]] = Field(default=None, validation_alias=AliasChoices("metadata", "metadata_dict"))
+    metadata_dict: Optional[Dict[str, Any]] = Field(default=None, serialization_alias="metadata", validation_alias=AliasChoices("metadata_dict", "metadata"))
     detected_at: datetime
     resolved_at: Optional[datetime]
     is_active: bool

@@ -83,9 +83,16 @@ class EventService:
             ).fetchall()
 
             # Convert event-based anomalies
+            import json
             event_anomalies = []
             for ev in anomaly_events:
-                meta = ev.metadata or {}
+                meta = ev.metadata
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except Exception:
+                        meta = {}
+                meta = meta or {}
                 event_anomalies.append(AnomalyOut(
                     id=ev.id,
                     anomaly_type=meta.get("anomaly_type", "unknown"),

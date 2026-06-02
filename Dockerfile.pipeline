@@ -1,0 +1,35 @@
+FROM python:3.11-slim
+
+LABEL description="Store Intelligence System - Detection Pipeline"
+
+# Install system dependencies (OpenCV headless needs libGL etc.)
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    curl \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements/pipeline.txt /tmp/pipeline.txt
+RUN pip install --no-cache-dir -r /tmp/pipeline.txt
+
+# Pre-download YOLOv8n model weights
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" || true
+
+# Copy source
+COPY src/ ./src/
+COPY scripts/ ./scripts/
+
+ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Default: run CSV seeder + exit (pipeline runs on-demand via API)
+CMD ["python", "-m", "src.pipeline.csv_processor", "--synthetic", "--visitors", "50"]

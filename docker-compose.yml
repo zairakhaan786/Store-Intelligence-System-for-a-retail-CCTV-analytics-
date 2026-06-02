@@ -1,0 +1,190 @@
+# =============================================================
+# Store Intelligence System — Docker Compose
+# AI Store Intelligence System
+#
+# Services:
+#   postgres   — PostgreSQL 16 database
+#   redis      — Redis cache (session state, rate limiting)
+#   pipeline   — Detection pipeline (seeder / one-shot)
+#   api        — FastAPI REST service
+#   dashboard  — Streamlit analytics dashboard
+#   gallery    — React + Three.js 3D gallery (optional)
+#
+# Usage:
+#   docker compose up            # Start all services
+#   docker compose up --build    # Rebuild and start
+#   docker compose up api dashboard  # Start specific services
+#   docker compose down -v       # Stop and remove volumes
+# =============================================================
+
+version: "3.9"
+
+x-common-env: &common-env
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: store_intelligence
+  POSTGRES_USER: retail_admin
+  POSTGRES_PASSWORD: retail_secret
+  DATABASE_URL: postgresql://retail_admin:retail_secret@postgres:5432/store_intelligence
+  REDIS_URL: redis://redis:6379/0
+
+services:
+
+  # ────────────────────────────────────────────────────────────
+  # PostgreSQL 16 — Primary datastore
+  # ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: si_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: store_intelligence
+      POSTGRES_USER: retail_admin
+      POSTGRES_PASSWORD: retail_secret
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U retail_admin -d store_intelligence"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - si_network
+
+  # ────────────────────────────────────────────────────────────
+  # Redis — Caching, rate limiting, session state
+  # ────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: si_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - si_network
+
+  # ────────────────────────────────────────────────────────────
+  # Detection Pipeline — Seeds DB with events, then exits
+  # ────────────────────────────────────────────────────────────
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile.pipeline
+    container_name: si_pipeline
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      YOLO_MODEL: yolov8n.pt
+      YOLO_CONFIDENCE: "0.35"
+      TRACKER_MAX_AGE: "30"
+      REENTRY_GAP_SECONDS: "30"
+      GROUP_ENTRY_MIN_SIZE: "3"
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - si_network
+    command: >
+      python -c "
+      import time, sys
+      print('Pipeline: waiting for DB to be ready...', flush=True)
+      time.sleep(5)
+      from src.pipeline.csv_processor import generate_synthetic_events
+      from src.shared.config import settings
+      try:
+          n = generate_synthetic_events(db_url=settings.database_url, n_visitors=60)
+          print(f'Pipeline: seeded {n} events successfully', flush=True)
+      except Exception as e:
+          print(f'Pipeline: seeding failed ({e}), API will auto-seed on startup', flush=True)
+          sys.exit(0)
+      "
+
+  # ────────────────────────────────────────────────────────────
+  # FastAPI — REST API service
+  # ────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: si_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pipeline:
+        condition: service_completed_successfully
+    environment:
+      <<: *common-env
+      LOG_LEVEL: INFO
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - si_network
+    volumes:
+      - ./src:/app/src:ro
+
+  # ────────────────────────────────────────────────────────────
+  # Streamlit Dashboard — Analytics UI
+  # ────────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: si_dashboard
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - si_network
+    volumes:
+      - ./src/dashboard:/app/src/dashboard:ro
+
+# ────────────────────────────────────────────────────────────
+# Volumes & Networks
+# ────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  si_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

@@ -224,85 +224,32 @@ class VideoPipeline:
         return summary
 
     def _flush_events(self, events: List[StoreEvent]) -> None:
-        """Write event batch to database (PostgreSQL or SQLite)."""
+        """Send event batch to the REST API for processing and session creation."""
         if not events:
             return
         try:
-            if "sqlite" in self._db_url:
-                import sqlite3
-                db_path = self._db_url.replace("sqlite:///", "").replace("sqlite://", "")
-                if not db_path:
-                    db_path = "store_intelligence.db"
-                conn = sqlite3.connect(db_path)
-                try:
-                    cursor = conn.cursor()
-                    rows = [(
-                        str(uuid.uuid4()),
-                        "STORE_BLR_002",
-                        ev.camera_id,
-                        ev.track_id,
-                        ev.session_id,
-                        ev.event_type,
-                        datetime.fromtimestamp(ev.timestamp, tz=timezone.utc).isoformat(),
-                        ev.zone_id,
-                        None,
-                        False,
-                        ev.confidence,
-                        json.dumps(_clean_for_json(ev.metadata)),
-                        ev.frame_number,
-                        json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
-                    ) for ev in events]
-                    cursor.executemany(
-                        """
-                        INSERT OR IGNORE INTO events
-                            (id, store_id, camera_id, visitor_id, session_id, event_type,
-                             timestamp, zone_id, dwell_ms, is_staff, confidence, metadata, frame_number, bbox)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        rows,
-                    )
-                    conn.commit()
-                    logger.debug("Events flushed (sqlite)", count=len(rows))
-                finally:
-                    conn.close()
+            import requests
+            payload = []
+            for ev in events:
+                payload.append({
+                    "event_id": str(uuid.uuid4()),
+                    "store_id": "STORE_BLR_002",
+                    "camera_id": ev.camera_id,
+                    "visitor_id": ev.track_id,
+                    "event_type": ev.event_type,
+                    "timestamp": datetime.fromtimestamp(ev.timestamp, tz=timezone.utc).isoformat(),
+                    "zone_id": ev.zone_id,
+                    "dwell_ms": 0,
+                    "is_staff": False,
+                    "confidence": ev.confidence,
+                    "metadata": {"frame_number": ev.frame_number, "bbox": ev.bbox}
+                })
+            
+            resp = requests.post("http://127.0.0.1:8000/events/ingest", json=payload, timeout=10)
+            if resp.status_code == 200:
+                logger.debug("Events flushed via API", count=len(events))
             else:
-                import psycopg2
-                from psycopg2.extras import execute_values
-
-                rows = [(
-                    str(uuid.uuid4()),
-                    "STORE_BLR_002",
-                    ev.camera_id,
-                    ev.track_id,
-                    ev.session_id,
-                    ev.event_type,
-                    datetime.fromtimestamp(ev.timestamp, tz=timezone.utc),
-                    ev.zone_id,
-                    None,
-                    False,
-                    ev.confidence,
-                    json.dumps(_clean_for_json(ev.metadata)),
-                    ev.frame_number,
-                    json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
-                ) for ev in events]
-
-                conn = psycopg2.connect(self._db_url)
-                try:
-                    with conn.cursor() as cur:
-                        execute_values(
-                            cur,
-                            """
-                            INSERT INTO events
-                                (id, store_id, camera_id, visitor_id, session_id, event_type,
-                                 timestamp, zone_id, dwell_ms, is_staff, confidence, metadata, frame_number, bbox)
-                            VALUES %s ON CONFLICT DO NOTHING
-                            """,
-                            rows,
-                        )
-                    conn.commit()
-                    logger.debug("Events flushed", count=len(rows))
-                finally:
-                    conn.close()
+                logger.error("API event ingest failed", status=resp.status_code, text=resp.text)
         except Exception as exc:
             logger.error("Event flush failed", error=str(exc))
 

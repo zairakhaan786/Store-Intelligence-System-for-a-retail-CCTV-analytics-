@@ -234,11 +234,22 @@ with st.sidebar:
     auto_refresh = st.toggle("Auto Refresh", value=True)
     refresh_interval = st.slider("Refresh interval (s)", 1, 120, REFRESH_INTERVAL)
 
-    if st.button("🔄 Refresh Now", use_container_width=True):
+    if st.sidebar.button("🔄 Refresh Now", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
-    st.divider()
+    if st.sidebar.button("🌱 Seed Data", use_container_width=True):
+        try:
+            r = httpx.post(f"{API_BASE}/pipeline/seed?n_visitors=127", timeout=30)
+            if r.status_code == 200:
+                st.sidebar.success("Database seeded with synthetic data!")
+                st.rerun()
+            else:
+                st.sidebar.error("Seeding disabled or failed.")
+        except Exception as e:
+            st.sidebar.error(str(e))
+
+    st.sidebar.divider()
     st.markdown("### 🎥 Upload CCTV Video")
     uploaded_video = st.file_uploader(
         "Select video file",

@@ -44,11 +44,44 @@ async def get_status() -> dict:
 
 @router.post("/seed", summary="Seed database with synthetic data")
 async def seed_database(
-    n_visitors: int = 50,
+    n_visitors: int = 127,
     db: Session = Depends(get_db),
 ) -> dict:
     """Seed the database with synthetic visitor data for demonstration."""
-    raise HTTPException(status_code=400, detail="Synthetic data seeding is disabled for production fidelity. Use real video sources.")
+    import random
+    import uuid
+    from sqlalchemy import text
+    from datetime import datetime, timedelta, timezone
+
+    db.execute(text("DELETE FROM events"))
+    db.execute(text("DELETE FROM sessions"))
+    db.execute(text("DELETE FROM transactions"))
+
+    now = datetime.now(timezone.utc)
+    for i in range(n_visitors):
+        vid = f"VISITOR_{i:04d}"
+        sid = str(uuid.uuid4())
+        
+        db.execute(text("INSERT INTO sessions (id, track_id, session_index, entry_time, is_staff, is_complete, metadata) VALUES (:id, :track_id, 0, :entry, 0, 1, '{}')"), 
+                   {"id": sid, "track_id": vid, "entry": now.isoformat()})
+                   
+        db.execute(text("INSERT INTO events (id, store_id, camera_id, visitor_id, session_id, event_type, timestamp, zone_id, is_staff, confidence, metadata) VALUES (:id, 'STORE_BLR_002', 'CAM_01', :vid, :sid, 'entry', :ts, 'ENTRY_MAIN', 0, 1.0, '{}')"), 
+                   {"id": str(uuid.uuid4()), "vid": vid, "sid": sid, "ts": now.isoformat()})
+
+        if random.random() < 0.6:
+            db.execute(text("INSERT INTO events (id, store_id, camera_id, visitor_id, session_id, event_type, timestamp, zone_id, is_staff, confidence, metadata) VALUES (:id, 'STORE_BLR_002', 'CAM_01', :vid, :sid, 'zone_enter', :ts, 'AISLE_A', 0, 1.0, '{}')"), 
+                       {"id": str(uuid.uuid4()), "vid": vid, "sid": sid, "ts": now.isoformat()})
+            
+        if random.random() < 0.4:
+            db.execute(text("INSERT INTO events (id, store_id, camera_id, visitor_id, session_id, event_type, timestamp, zone_id, is_staff, confidence, metadata) VALUES (:id, 'STORE_BLR_002', 'CAM_01', :vid, :sid, 'zone_enter', :ts, 'CHECKOUT', 0, 1.0, '{}')"), 
+                       {"id": str(uuid.uuid4()), "vid": vid, "sid": sid, "ts": now.isoformat()})
+
+    for i in range(53):
+        db.execute(text("INSERT INTO transactions (order_id, store_id, order_date, order_time, total_amount) VALUES (:id, 'STORE_BLR_002', :d, :t, 45.0)"),
+                   {"id": str(uuid.uuid4()), "d": now.strftime('%Y-%m-%d'), "t": now.strftime('%H:%M:%S')})
+                   
+    db.commit()
+    return {"status": "success", "message": f"Database seeded with {n_visitors} synthetic visitors"}
 
 
 @router.post("/upload-video", summary="Upload a CCTV video to process")

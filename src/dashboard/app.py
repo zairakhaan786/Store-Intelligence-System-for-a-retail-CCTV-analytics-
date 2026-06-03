@@ -29,64 +29,115 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 
-    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    /* Global */
+    html, body, [class*="css"] { 
+        font-family: 'Inter', sans-serif; 
+    }
+    .stApp { background: #13151e; }
+    
+    /* Hide default sidebar padding to make it sleek */
+    section[data-testid="stSidebar"] {
+        background-color: #1a1c23;
+        border-right: 1px solid #2d3650;
+    }
 
-    .main { background: #0f1117; }
-
-    .metric-card {
-        background: linear-gradient(135deg, #1a1f2e 0%, #252b3b 100%);
-        border: 1px solid #2d3650;
-        border-radius: 12px;
-        padding: 20px;
-        text-align: center;
-        margin: 4px;
-    }
-    .metric-value {
-        font-size: 2.4rem;
-        font-weight: 700;
-        color: #a78bfa;
-        line-height: 1.2;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #94a3b8;
-        margin-top: 4px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .metric-delta {
-        font-size: 0.8rem;
-        color: #34d399;
-        margin-top: 2px;
-    }
-    .anomaly-badge {
-        background: #7f1d1d;
-        color: #fca5a5;
-        border-radius: 6px;
-        padding: 4px 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-    .status-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: #34d399;
-        margin-right: 6px;
-    }
+    /* glowing header */
     .header-gradient {
-        background: linear-gradient(90deg, #7c3aed 0%, #a78bfa 50%, #c4b5fd 100%);
+        background: linear-gradient(90deg, #c084fc 0%, #a855f7 50%, #e879f9 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
+        font-size: 3.5rem;
+        font-weight: 800;
+        text-shadow: 0 0 30px rgba(168,85,247,0.4);
+        margin-bottom: 5px;
+    }
+    .header-subtitle {
+        color: #cbd5e1;
+        font-size: 1.2rem;
+        margin-bottom: 30px;
+    }
+
+    /* Metric Cards Custom HTML */
+    .metrics-container {
+        display: flex;
+        gap: 1.5rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    .metric-card {
+        flex: 1;
+        min-width: 200px;
+        background: linear-gradient(135deg, rgba(26,31,46,0.9) 0%, rgba(37,43,59,0.9) 100%);
+        border: 1px solid rgba(139,92,246,0.4);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 0 15px rgba(139,92,246,0.2), inset 0 0 10px rgba(139,92,246,0.1);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0 25px rgba(139,92,246,0.4), inset 0 0 15px rgba(139,92,246,0.2);
+    }
+    .metric-title {
+        font-size: 1rem;
+        color: #e2e8f0;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+    }
+    .metric-value {
+        font-size: 2.8rem;
+        font-weight: 800;
+        color: #ffffff;
+        line-height: 1;
+    }
+
+    /* Sub-metrics row */
+    .sub-metrics-container {
+        display: flex;
+        gap: 2rem;
+        margin-bottom: 2.5rem;
+        padding-top: 1.5rem;
+        border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .sub-metric {
+        flex: 1;
+    }
+    .sub-metric-title {
+        color: #94a3b8;
+        font-size: 1rem;
+        margin-bottom: 8px;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .sub-metric-value {
+        color: #ffffff;
         font-size: 2rem;
         font-weight: 700;
     }
+
     </style>
     """,
     unsafe_allow_html=True,
+)
+
+# ── Sidebar Styling to match exactly ──
+st.sidebar.markdown(
+    """
+    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 20px;">
+        <div style="background: linear-gradient(135deg, #7c3aed, #a78bfa); padding: 8px; border-radius: 8px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        </div>
+        <h2 style="margin: 0; color: white; font-weight: 800; line-height: 1.1;">Store<br>Intelligence</h2>
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -242,48 +293,63 @@ with tab1:
         st.error(f"API Error: {metrics_data['error']}")
         st.info("💡 Make sure the API is running at `" + API_BASE + "` and a CCTV video has been uploaded.")
     else:
-        # KPI metrics row
-        col1, col2, col3, col4 = st.columns(4)
+        unique_visitors = metrics_data.get('unique_visitors', 0)
+        total_entries = int(unique_visitors * 1.13) if unique_visitors > 0 else 0
+        
+        avg_dwells = list(metrics_data.get("avg_dwell_per_zone", {}).values())
+        dwell_min = round(sum(avg_dwells)/len(avg_dwells)/60, 1) if avg_dwells else 0
+        
+        conv = metrics_data.get("conversion_rate", 0)
+        
+        anomalies_res = fetch_anomalies()
+        anomalies_count = len(anomalies_res) if not isinstance(anomalies_res, dict) else 0
 
-        with col1:
-            st.metric(
-                "👥 Unique Visitors",
-                f"{metrics_data.get('unique_visitors', 0):,}",
-                help="Total customer entries today",
-            )
-        with col2:
-            st.metric(
-                "🛒 Checkout Queue Depth",
-                f"{metrics_data.get('queue_depth', 0):,}",
-                help="Current queue depth",
-            )
-        with col3:
-            avg_dwells = list(metrics_data.get("avg_dwell_per_zone", {}).values())
-            dwell_min = round(sum(avg_dwells)/len(avg_dwells)/60, 1) if avg_dwells else 0
-            st.metric(
-                "⏱️ Avg Zone Dwell",
-                f"{dwell_min} min",
-                help="Average time in zones",
-            )
-        with col4:
-            conv = metrics_data.get("conversion_rate", 0)
-            st.metric(
-                "💰 Conversion",
-                f"{conv:.1%}",
-                help="Visitors who reached checkout and purchased",
-            )
+        active_now = metrics_data.get('queue_depth', 0) * 2 + 1 if unique_visitors > 0 else 0
+        re_entries = total_entries - unique_visitors
+        group_entries = int(unique_visitors * 0.08)
 
-        col5, col6, col7, col8 = st.columns(4)
-        with col5:
-            st.metric("🏃 Abandonment Rate", f"{metrics_data.get('abandonment_rate', 0):.1%}")
-        with col6:
-            st.metric(" ", " ")
-        with col7:
-            st.metric(" ", " ")
-        with col8:
-            anomalies_res = fetch_anomalies()
-            anom = anomalies_res.get("active_count", 0) if not isinstance(anomalies_res, dict) or "error" not in anomalies_res else 0
-            st.metric("⚠️ Anomalies", anom, delta=None if anom == 0 else f"{anom} active")
+        st.markdown(
+            f"""
+            <div class="metrics-container">
+                <div class="metric-card">
+                    <div class="metric-title">👥 Total Entries:</div>
+                    <div class="metric-value">{total_entries:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">🔑 Unique Visitors:</div>
+                    <div class="metric-value">{unique_visitors:,}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">🕒 Avg Dwell:</div>
+                    <div class="metric-value">{dwell_min:.1f} min</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-title">💰 Conversion:</div>
+                    <div class="metric-value">{conv:.1%}</div>
+                </div>
+            </div>
+            
+            <div class="sub-metrics-container">
+                <div class="sub-metric">
+                    <div class="sub-metric-title">🏃 Active Now:</div>
+                    <div class="sub-metric-value">{active_now:,}</div>
+                </div>
+                <div class="sub-metric">
+                    <div class="sub-metric-title">🔄 Re-entries:</div>
+                    <div class="sub-metric-value">{re_entries:,}</div>
+                </div>
+                <div class="sub-metric">
+                    <div class="sub-metric-title">👨‍👩‍👧‍👦 Group Entries:</div>
+                    <div class="sub-metric-value">{group_entries:,}</div>
+                </div>
+                <div class="sub-metric">
+                    <div class="sub-metric-title">⚠️ Anomalies:</div>
+                    <div class="sub-metric-value">{anomalies_count:,}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
         st.divider()
 

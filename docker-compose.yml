@@ -100,12 +100,7 @@ services:
     networks:
       - si_network
     command: >
-      python -c "
-      import time
-      print('Pipeline: waiting for DB to be ready...', flush=True)
-      time.sleep(2)
-      print('Pipeline: Ready to process live/uploaded video.', flush=True)
-      "
+      python -c "import time; print('Pipeline: waiting for DB to be ready...', flush=True); time.sleep(2); print('Pipeline: Ready to process live/uploaded video.', flush=True);"
 
   # ────────────────────────────────────────────────────────────
   # FastAPI — REST API service

@@ -78,14 +78,20 @@ Visual evidence of the platform operating in production mode:
 ### 1. Live Analytics Dashboard
 ![Dashboard Overview](screenshots/dashboard.png)
 
-### 2. Spatial Zone Heatmaps
+### 2. Visitor Funnel Metrics
+![Visitor Funnel](screenshots/funnel.png)
+
+### 3. Spatial Zone Heatmaps
 ![Zone Heatmap](screenshots/heatmap.png)
 
-### 3. Anomaly Alerts (Overcrowding & Queue Depth)
+### 4. Anomaly Alerts (Overcrowding & Queue Depth)
 ![Anomalies](screenshots/anomalies.png)
 
-### 4. Sales & Financial Analytics
+### 5. Sales & Financial Analytics
 ![Sales Analytics](screenshots/sales_revenue.png)
+
+### 6. API Swagger Documentation
+![API Docs](screenshots/api_docs.png)
 
 ---
 

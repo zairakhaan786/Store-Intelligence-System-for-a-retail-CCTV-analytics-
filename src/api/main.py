@@ -29,7 +29,8 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.models.database import get_engine, health_check
-from src.api.routers import anomalies, events, metrics, challenge
+from src.api.routers import anomalies, events, metrics
+from src.api.routers.challenge import router as challenge_router
 from src.api.routers.funnel import router as pipeline_router
 from src.api.routers.visitors import router as visitors_router
 from src.api.routers.gestures import router as gestures_router

@@ -3,6 +3,7 @@ Pydantic v2 schemas for request/response validation.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID

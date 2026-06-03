@@ -187,19 +187,6 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    if st.button("🌱 Seed Data", use_container_width=True):
-        with st.spinner("Seeding..."):
-            try:
-                r = httpx.post(f"{API_BASE}/pipeline/seed?n_visitors=50", timeout=30)
-                if r.status_code == 200:
-                    st.success("✅ Data seeded!")
-                    st.cache_data.clear()
-                    st.rerun()
-                else:
-                    st.error(f"Error: {r.text}")
-            except Exception as e:
-                st.error(f"Failed: {e}")
-
     st.divider()
     st.markdown("### 🎥 Upload CCTV Video")
     uploaded_video = st.file_uploader(
@@ -253,7 +240,7 @@ with tab1:
 
     if "error" in metrics_data:
         st.error(f"API Error: {metrics_data['error']}")
-        st.info("💡 Make sure the API is running at `" + API_BASE + "` and the database is seeded.")
+        st.info("💡 Make sure the API is running at `" + API_BASE + "` and a CCTV video has been uploaded.")
     else:
         # KPI metrics row
         col1, col2, col3, col4 = st.columns(4)
@@ -348,7 +335,7 @@ with tab2:
 
     funnel_data = fetch_funnel()
     if "error" in funnel_data or not funnel_data.get("stages"):
-        st.warning("No funnel data available. Seed the database to populate.")
+        st.warning("No funnel data available. Upload a CCTV video to populate.")
     else:
         stages = funnel_data["stages"]
         df_funnel = pd.DataFrame(stages)
@@ -387,7 +374,7 @@ with tab3:
 
     heatmap_data = fetch_heatmap()
     if "error" in heatmap_data or not heatmap_data.get("cells"):
-        st.warning("No heatmap data. Seed the database first.")
+        st.warning("No heatmap data. Upload a CCTV video first.")
     else:
         cells = heatmap_data["cells"]
         df_heat = pd.DataFrame(cells)
@@ -507,7 +494,7 @@ with tab4:
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("No events yet. Click 'Seed Data' in the sidebar.")
+            st.info("No events yet. Upload a CCTV video to begin processing.")
 
 
 # ── Tab 5: Anomalies ──────────────────────────────────────────────────────────

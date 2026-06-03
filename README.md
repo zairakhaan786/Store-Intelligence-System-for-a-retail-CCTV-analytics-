@@ -1,6 +1,6 @@
 # 🛍️ AI Store Intelligence System
 
-![Dashboard Overview](screenshots/dashboard.jpg)
+![Dashboard Overview](screenshots/dashboard.png)
 
 An enterprise-grade, real-time retail analytics platform powered by **YOLOv8** and **ByteTrack**. This system ingests CCTV video feeds, performs highly accurate multi-object tracking, and calculates complex spatial interactions (dwell time, queue depth, funnel conversions) via a modern decoupled microservices architecture.
 
@@ -76,19 +76,16 @@ open http://localhost:8000/docs
 Visual evidence of the platform operating in production mode:
 
 ### 1. Live Analytics Dashboard
-![Dashboard Overview](screenshots/dashboard.jpg)
+![Dashboard Overview](screenshots/dashboard.png)
 
-### 2. Visitor Funnel Metrics
-![Visitor Funnel](screenshots/funnel.png)
-
-### 3. Spatial Zone Heatmaps
+### 2. Spatial Zone Heatmaps
 ![Zone Heatmap](screenshots/heatmap.png)
 
-### 4. Anomaly Alerts (Overcrowding & Queue Depth)
+### 3. Anomaly Alerts (Overcrowding & Queue Depth)
 ![Anomalies](screenshots/anomalies.png)
 
-### 5. API Swagger Documentation
-![API Docs](screenshots/api_docs.png)
+### 4. Sales & Financial Analytics
+![Sales Analytics](screenshots/sales_revenue.png)
 
 ---
 

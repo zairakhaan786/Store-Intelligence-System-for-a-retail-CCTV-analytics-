@@ -12,7 +12,6 @@ from src.api.services.event_service import EventService
 
 router = APIRouter(prefix="/events", tags=["events"])
 
-
 @router.get("", response_model=EventListResponse, summary="List detection events")
 async def list_events(
     page: int = Query(default=1, ge=1, description="Page number"),
@@ -24,8 +23,6 @@ async def list_events(
 ) -> EventListResponse:
     """
     Paginated event log with optional filters.
-
-    Event types: entry, exit, zone_enter, zone_exit, reentry, group_entry, anomaly
     """
     svc = EventService(db)
     return svc.list_events(page, page_size, event_type, zone_id, camera_id)

@@ -16,7 +16,7 @@ import streamlit as st
 
 # ── Config ────────────────────────────────────────────────────────────────────
 API_BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
-REFRESH_INTERVAL = 30  # seconds
+REFRESH_INTERVAL = 2  # 2 seconds for real-time feel
 
 st.set_page_config(
     page_title="Store Intelligence System",
@@ -95,7 +95,7 @@ st.markdown(
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_metrics() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/metrics", timeout=10)
+        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/metrics", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -105,7 +105,7 @@ def fetch_metrics() -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_funnel() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/metrics/funnel", timeout=10)
+        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/funnel", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -125,11 +125,12 @@ def fetch_events(page: int = 1, page_size: int = 100) -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_anomalies() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/anomalies", timeout=10)
+        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/anomalies", timeout=10)
         r.raise_for_status()
-        return r.json()
+        # Since it returns a list, wrap in dict for compatibility
+        return {"anomalies": r.json(), "total": len(r.json()), "active_count": len(r.json())}
     except Exception as e:
-        return {"error": str(e), "anomalies": []}
+        return {"error": str(e), "anomalies": [], "total": 0, "active_count": 0}
 
 
 @st.cache_data(ttl=REFRESH_INTERVAL)
@@ -145,7 +146,7 @@ def fetch_occupancy() -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_heatmap() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/metrics/heatmap", timeout=10)
+        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/heatmap", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -179,8 +180,8 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🎛️ Controls")
 
-    auto_refresh = st.toggle("Auto Refresh", value=False)
-    refresh_interval = st.slider("Refresh interval (s)", 10, 120, REFRESH_INTERVAL)
+    auto_refresh = st.toggle("Auto Refresh", value=True)
+    refresh_interval = st.slider("Refresh interval (s)", 1, 120, REFRESH_INTERVAL)
 
     if st.button("🔄 Refresh Now", use_container_width=True):
         st.cache_data.clear()
@@ -259,41 +260,42 @@ with tab1:
 
         with col1:
             st.metric(
-                "👥 Total Entries",
-                f"{metrics_data.get('total_entries', 0):,}",
+                "👥 Unique Visitors",
+                f"{metrics_data.get('unique_visitors', 0):,}",
                 help="Total customer entries today",
             )
         with col2:
             st.metric(
-                "🔑 Unique Visitors",
-                f"{metrics_data.get('unique_visitors', 0):,}",
-                help="Deduplicated visitor count",
+                "🛒 Checkout Queue Depth",
+                f"{metrics_data.get('queue_depth', 0):,}",
+                help="Current queue depth",
             )
         with col3:
-            dwell = metrics_data.get("avg_dwell_seconds", 0)
-            dwell_min = round(dwell / 60, 1)
+            avg_dwells = list(metrics_data.get("avg_dwell_per_zone", {}).values())
+            dwell_min = round(sum(avg_dwells)/len(avg_dwells)/60, 1) if avg_dwells else 0
             st.metric(
-                "⏱️ Avg Dwell",
+                "⏱️ Avg Zone Dwell",
                 f"{dwell_min} min",
-                help="Average time in store",
+                help="Average time in zones",
             )
         with col4:
             conv = metrics_data.get("conversion_rate", 0)
             st.metric(
                 "💰 Conversion",
                 f"{conv:.1%}",
-                help="Visitors who reached checkout",
+                help="Visitors who reached checkout and purchased",
             )
 
         col5, col6, col7, col8 = st.columns(4)
         with col5:
-            st.metric("🏃 Active Now", metrics_data.get("active_sessions", 0))
+            st.metric("🏃 Abandonment Rate", f"{metrics_data.get('abandonment_rate', 0):.1%}")
         with col6:
-            st.metric("🔁 Re-entries", metrics_data.get("reentry_count", 0))
+            st.metric(" ", " ")
         with col7:
-            st.metric("👨‍👩‍👦 Group Entries", metrics_data.get("group_entry_count", 0))
+            st.metric(" ", " ")
         with col8:
-            anom = metrics_data.get("anomaly_count", 0)
+            anomalies_res = fetch_anomalies()
+            anom = anomalies_res.get("active_count", 0) if not isinstance(anomalies_res, dict) or "error" not in anomalies_res else 0
             st.metric("⚠️ Anomalies", anom, delta=None if anom == 0 else f"{anom} active")
 
         st.divider()
@@ -408,7 +410,7 @@ with tab3:
 
         for cell in cells:
             zid = cell["zone_id"]
-            heat = cell["heat_value"]
+            heat = cell["visit_frequency"] / 100.0  # Normalized to 0-1
             if zid in zone_bounds:
                 x0, y0, x1, y1 = zone_bounds[zid]
                 r = int(124 + heat * 131)
@@ -419,7 +421,7 @@ with tab3:
                               fillcolor=color, line=dict(color="#7c3aed", width=1))
                 fig.add_annotation(
                     x=(x0 + x1) / 2, y=(y0 + y1) / 2,
-                    text=f"<b>{cell['name']}</b><br>{cell['visit_count']} visits",
+                    text=f"<b>{zid}</b><br>{cell['visit_frequency']}% frequency",
                     showarrow=False, font=dict(color="white", size=10),
                 )
 
@@ -435,13 +437,11 @@ with tab3:
         st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(
-            df_heat[["zone_id", "name", "visit_count", "avg_dwell", "heat_value"]].rename(
+            df_heat[["zone_id", "visit_frequency", "avg_dwell_seconds"]].rename(
                 columns={
                     "zone_id": "Zone ID",
-                    "name": "Zone Name",
-                    "visit_count": "Visits",
-                    "avg_dwell": "Avg Dwell (s)",
-                    "heat_value": "Heat Score",
+                    "visit_frequency": "Visit Frequency (%)",
+                    "avg_dwell_seconds": "Avg Dwell (s)",
                 }
             ),
             use_container_width=True,

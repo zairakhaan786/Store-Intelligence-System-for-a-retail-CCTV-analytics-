@@ -116,15 +116,16 @@ You can test the APIs directly via `curl` or through the interactive docs (`http
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /health` | Validates API, DB, and system uptime. |
-| `GET /metrics` | Returns total entries, exits, unique visitors, and active sessions. |
-| `GET /metrics/occupancy` | Returns exact current occupancy per mapped zone. |
-| `GET /metrics/funnel` | Returns conversion data and visit stages. |
-| `GET /anomalies` | Returns active anomaly triggers (loitering, overcrowding). |
+| `GET /health` | Validates API, DB, and system uptime, including feed latency. |
+| `POST /events/ingest` | Ingests tracker events matching the exact evaluation schema. |
+| `GET /stores/{id}/metrics` | Returns store KPIs: unique visitors, conversion rate, queue depth. |
+| `GET /stores/{id}/funnel` | Returns conversion funnel stages deduplicated by session. |
+| `GET /stores/{id}/heatmap` | Returns zone visit frequency and dwell heatmaps. |
+| `GET /stores/{id}/anomalies` | Returns active operational anomalies (overcrowding, queues). |
 
 **Example:**
 ```bash
-curl -X GET "http://localhost:8000/metrics/occupancy" -H "accept: application/json"
+curl -X GET "http://localhost:8000/stores/STORE_BLR_002/metrics" -H "accept: application/json"
 ```
 
 ---

@@ -1,5 +1,8 @@
 """
 API endpoint tests — validates the 4 mandatory acceptance checks.
+
+# PROMPT: Generate comprehensive pytest test cases for FastAPI endpoints including /metrics, /funnel, /heatmap, and /anomalies. Ensure assertions cover 200 responses and required JSON keys.
+# CHANGES MADE: I updated the endpoints to match the new /stores/{id}/ architecture required by the challenge evaluation, and added an explicit check for the 503 fallback when the DB is offline.
 """
 from __future__ import annotations
 

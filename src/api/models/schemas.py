@@ -19,33 +19,33 @@ class PaginationParams(BaseModel):
 
 # ── Events ────────────────────────────────────────────────────────────────────
 
-class EventOut(BaseModel):
-    id: UUID
+class EventIngest(BaseModel):
+    event_id: UUID = Field(default_factory=uuid.uuid4)
+    store_id: str
+    camera_id: str
+    visitor_id: str
     event_type: str
-    track_id: Optional[str]
-    session_id: Optional[UUID]
-    camera_id: Optional[str]
-    zone_id: Optional[str]
     timestamp: datetime
-    frame_number: Optional[int]
-    confidence: Optional[float]
-    bbox: Optional[Dict[str, float]] = None
+    zone_id: Optional[str] = None
+    dwell_ms: Optional[int] = None
+    is_staff: bool = False
+    confidence: Optional[float] = 1.0
+    metadata_dict: Optional[Dict[str, Any]] = Field(default=None, alias="metadata")
+
+class EventOut(BaseModel):
+    event_id: UUID = Field(alias="id", serialization_alias="event_id")
+    store_id: str
+    camera_id: str
+    visitor_id: str
+    event_type: str
+    timestamp: datetime
+    zone_id: Optional[str] = None
+    dwell_ms: Optional[int] = None
+    is_staff: bool = False
+    confidence: Optional[float] = 1.0
     metadata_dict: Optional[Dict[str, Any]] = Field(default=None, serialization_alias="metadata", validation_alias=AliasChoices("metadata_dict", "metadata"))
 
-    model_config = {"from_attributes": True}
-
-    @field_validator("bbox", mode="before")
-    @classmethod
-    def parse_bbox(cls, v: Any) -> Any:
-        if isinstance(v, str):
-            import json
-            try:
-                v = json.loads(v)
-            except Exception:
-                pass
-        if isinstance(v, dict) and "bbox" in v:
-            return v["bbox"]
-        return v
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
     @field_validator("metadata_dict", mode="before")
     @classmethod

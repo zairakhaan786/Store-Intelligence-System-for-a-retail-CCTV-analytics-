@@ -238,23 +238,26 @@ class VideoPipeline:
                     cursor = conn.cursor()
                     rows = [(
                         str(uuid.uuid4()),
-                        ev.event_type,
+                        "STORE_BLR_002",
+                        ev.camera_id,
                         ev.track_id,
                         ev.session_id,
-                        ev.camera_id,
-                        ev.zone_id,
+                        ev.event_type,
                         datetime.fromtimestamp(ev.timestamp, tz=timezone.utc).isoformat(),
-                        ev.frame_number,
+                        ev.zone_id,
+                        None,
+                        False,
                         ev.confidence,
-                        json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
                         json.dumps(_clean_for_json(ev.metadata)),
+                        ev.frame_number,
+                        json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
                     ) for ev in events]
                     cursor.executemany(
                         """
                         INSERT OR IGNORE INTO events
-                            (id, event_type, track_id, session_id, camera_id, zone_id,
-                             timestamp, frame_number, confidence, bbox, metadata)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            (id, store_id, camera_id, visitor_id, session_id, event_type,
+                             timestamp, zone_id, dwell_ms, is_staff, confidence, metadata, frame_number, bbox)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         rows,
                     )
@@ -268,16 +271,19 @@ class VideoPipeline:
 
                 rows = [(
                     str(uuid.uuid4()),
-                    ev.event_type,
+                    "STORE_BLR_002",
+                    ev.camera_id,
                     ev.track_id,
                     ev.session_id,
-                    ev.camera_id,
-                    ev.zone_id,
+                    ev.event_type,
                     datetime.fromtimestamp(ev.timestamp, tz=timezone.utc),
-                    ev.frame_number,
+                    ev.zone_id,
+                    None,
+                    False,
                     ev.confidence,
-                    json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
                     json.dumps(_clean_for_json(ev.metadata)),
+                    ev.frame_number,
+                    json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
                 ) for ev in events]
 
                 conn = psycopg2.connect(self._db_url)
@@ -287,8 +293,8 @@ class VideoPipeline:
                             cur,
                             """
                             INSERT INTO events
-                                (id, event_type, track_id, session_id, camera_id, zone_id,
-                                 timestamp, frame_number, confidence, bbox, metadata)
+                                (id, store_id, camera_id, visitor_id, session_id, event_type,
+                                 timestamp, zone_id, dwell_ms, is_staff, confidence, metadata, frame_number, bbox)
                             VALUES %s ON CONFLICT DO NOTHING
                             """,
                             rows,

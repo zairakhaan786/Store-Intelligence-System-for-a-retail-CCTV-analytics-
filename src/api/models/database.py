@@ -87,17 +87,20 @@ class SessionModel(Base):
 class EventModel(Base):
     __tablename__ = "events"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    event_type = Column(String(50), nullable=False)
-    track_id = Column(String(100))
-    session_id = Column(UUID(as_uuid=True))
+    id = Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    store_id = Column(String(50), default="STORE_BLR_002")
     camera_id = Column(String(50))
-    zone_id = Column(String(50))
+    visitor_id = Column(String(100))
+    session_id = Column(UUID(as_uuid=True))
+    event_type = Column(String(50), nullable=False)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    frame_number = Column(Integer)
+    zone_id = Column(String(50))
+    dwell_ms = Column(Integer, nullable=True)
+    is_staff = Column(Boolean, default=False)
     confidence = Column(Float)
-    bbox = Column(JSON)
     metadata_dict = Column("metadata", JSON, default=dict)
+    frame_number = Column(Integer)
+    bbox = Column(JSON)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 

@@ -411,5 +411,21 @@ This ensures:
 
 ---
 
+## 15. AI-Assisted Decisions
+
+1. **Zone Containment over ReID for Funnels**
+   - *AI Suggestion*: The LLM suggested implementing a FastReID model for cross-camera correlation to track a shopper journey perfectly from entry to checkout.
+   - *My Decision*: Overrode. A FastReID model adds significant latency (requires GPU). Instead, I mapped the overlapping cameras to physical normalized zones in `zone_manager.py` and used a simplified session-tracking model linked by continuous timestamps. This ensures real-time compatibility at the expense of slight double-counting on camera handoffs.
+
+2. **Database Schema Design**
+   - *AI Suggestion*: The AI suggested building separate tables for `entries`, `exits`, `zone_transitions`, and `anomalies` to cleanly type the data.
+   - *My Decision*: Agreed partially, but pivoted to a single `events` table with a `JSONB` metadata column. The AI was right about normalization, but a unified events stream is much easier to feed into the API `POST /events/ingest` without requiring the client pipeline to manage relational consistency across 5 tables.
+
+3. **Dashboard Real-time Polling**
+   - *AI Suggestion*: Use WebSockets (FastAPI WebSockets + React) for true real-time metric pushes to the frontend.
+   - *My Decision*: Disagreed. Added Streamlit with a simple 2-second `ttl` cache loop. This drastically reduces the complexity of the Docker deployment and prevents state desync bugs when the pipeline lags, fulfilling the real-time requirement within a 5-minute development window.
+
+---
+
 *Architecture designed for AI Store Intelligence System*
 *Author: Store Intelligence Team*

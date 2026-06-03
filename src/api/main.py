@@ -29,34 +29,23 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from src.api.models.database import get_engine, health_check
-from src.api.routers import anomalies, events, metrics
+from src.api.routers import anomalies, events, metrics, challenge
 from src.api.routers.funnel import router as pipeline_router
 from src.api.routers.visitors import router as visitors_router
 from src.api.routers.gestures import router as gestures_router
-from src.api.routers.challenge import router as challenge_router
 from src.shared.config import settings
 from src.shared.logger import configure_logging, get_logger
 
 configure_logging(settings.log_level)
 logger = get_logger(__name__)
 
+# Track uptime
 START_TIME = time.time()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application startup / shutdown lifecycle."""
-    logger.info("Starting Store Intelligence API", version="1.0.0")
-
-    # Verify DB connection
-    if not health_check():
-        logger.warning("Database not reachable at startup — will retry on requests")
-    else:
-        logger.info("Database connection healthy")
-
-        # Startup checks completed
-        pass
-
+    # Startup: setup resources if needed
     yield
 
     logger.info("Shutting down Store Intelligence API")
@@ -133,27 +122,7 @@ async def root() -> dict:
     }
 
 
-@app.get("/health", tags=["health"], summary="Health check")
-async def health() -> dict:
-    """
-    Service health check — validates DB connectivity.
-    Returns 200 if healthy, 503 if degraded.
-    """
-    db_ok = health_check()
-    uptime = round(time.time() - START_TIME, 2)
-    status = "healthy" if db_ok else "degraded"
 
-    payload = {
-        "status": status,
-        "database": db_ok,
-        "version": "1.0.0",
-        "uptime_seconds": uptime,
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-    }
-
-    if not db_ok:
-        return JSONResponse(status_code=503, content=payload)
-    return payload
 
 
 if __name__ == "__main__":

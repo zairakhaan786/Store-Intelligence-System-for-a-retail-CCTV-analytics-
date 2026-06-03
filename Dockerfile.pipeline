@@ -32,4 +32,4 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Default: run CSV seeder + exit (pipeline runs on-demand via API)
-CMD ["python", "-m", "src.pipeline.csv_processor", "--synthetic", "--visitors", "50"]
+CMD ["python", "-c", "import time; print('Pipeline idle, use API to trigger.', flush=True); time.sleep(86400)"]

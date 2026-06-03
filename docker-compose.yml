@@ -101,17 +101,10 @@ services:
       - si_network
     command: >
       python -c "
-      import time, sys
+      import time
       print('Pipeline: waiting for DB to be ready...', flush=True)
-      time.sleep(5)
-      from src.pipeline.csv_processor import generate_synthetic_events
-      from src.shared.config import settings
-      try:
-          n = generate_synthetic_events(db_url=settings.database_url, n_visitors=60)
-          print(f'Pipeline: seeded {n} events successfully', flush=True)
-      except Exception as e:
-          print(f'Pipeline: seeding failed ({e}), API will auto-seed on startup', flush=True)
-          sys.exit(0)
+      time.sleep(2)
+      print('Pipeline: Ready to process live/uploaded video.', flush=True)
       "
 
   # ────────────────────────────────────────────────────────────

@@ -98,15 +98,7 @@ async def ingest_events(events: List[IngestedEvent], db: Session = Depends(get_d
 
     try:
         for ev in events:
-            # Check for idempotency (check if event_id already exists in db)
-            exists = db.execute(
-                text("SELECT 1 FROM events WHERE id = :event_id"),
-                {"event_id": ev.event_id}
-            ).fetchone()
-
-            if exists:
-                duplicate_count += 1
-                continue
+            # Skip explicit SELECT 1, rely on ON CONFLICT DO NOTHING below
 
             # Map IngestedEvent to EventModel
             # store_id, visitor_id, is_staff, dwell_ms are placed in metadata_dict
@@ -122,21 +114,24 @@ async def ingest_events(events: List[IngestedEvent], db: Session = Depends(get_d
             # Format timestamp as ISO string for SQLite
             ts_str = ev.timestamp.isoformat()
 
-            # Insert event
             db.execute(
                 text("""
-                    INSERT INTO events (id, event_type, track_id, camera_id, zone_id, timestamp, confidence, metadata)
-                    VALUES (:id, :event_type, :track_id, :camera_id, :zone_id, :timestamp, :confidence, :metadata)
+                    INSERT INTO events (id, store_id, camera_id, visitor_id, event_type, timestamp, zone_id, dwell_ms, is_staff, confidence, metadata)
+                    VALUES (:id, :store_id, :camera_id, :visitor_id, :event_type, :timestamp, :zone_id, :dwell_ms, :is_staff, :confidence, :metadata)
+                    ON CONFLICT(id) DO NOTHING
                 """),
                 {
                     "id": ev.event_id,
-                    "event_type": ev.event_type.lower(),
-                    "track_id": ev.visitor_id,
+                    "store_id": ev.store_id,
                     "camera_id": ev.camera_id,
-                    "zone_id": ev.zone_id,
+                    "visitor_id": ev.visitor_id,
+                    "event_type": ev.event_type.lower(),
                     "timestamp": ts_str,
+                    "zone_id": ev.zone_id,
+                    "dwell_ms": ev.dwell_ms,
+                    "is_staff": 1 if ev.is_staff else 0,
                     "confidence": ev.confidence,
-                    "metadata": json.dumps(metadata_dict)
+                    "metadata": json.dumps(ev.metadata or {})
                 }
             )
 
@@ -293,7 +288,7 @@ async def get_store_metrics(id: str, db: Session = Depends(get_db)):
                 FROM (
                     SELECT e1.zone_id, e1.timestamp as entry_time, MIN(e2.timestamp) as exit_time
                     FROM events e1
-                    JOIN events e2 ON e1.track_id = e2.track_id AND e1.zone_id = e2.zone_id
+                    JOIN events e2 ON e1.visitor_id = e2.visitor_id AND e1.zone_id = e2.zone_id
                     WHERE e1.event_type = 'zone_enter' AND e2.event_type = 'zone_exit'
                       AND e2.timestamp > e1.timestamp
                     GROUP BY e1.id

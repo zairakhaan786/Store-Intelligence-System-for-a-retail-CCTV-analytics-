@@ -66,21 +66,25 @@ CREATE INDEX idx_sessions_is_complete ON sessions(is_complete);
 -- =============================================================
 CREATE TABLE IF NOT EXISTS events (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    event_type      VARCHAR(50) NOT NULL,  -- 'entry','exit','dwell','reentry','group_entry','anomaly'
-    track_id        VARCHAR(100),
-    session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    store_id        VARCHAR(50) DEFAULT 'STORE_BLR_002',
     camera_id       VARCHAR(50),
-    zone_id         VARCHAR(50),
+    visitor_id      VARCHAR(100),
+    session_id      UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    event_type      VARCHAR(50) NOT NULL,
     timestamp       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    frame_number    INTEGER,
+    zone_id         VARCHAR(50),
+    dwell_ms        INTEGER,
+    is_staff        BOOLEAN DEFAULT FALSE,
     confidence      FLOAT,
-    bbox            JSONB,                 -- {x1,y1,x2,y2}
-    metadata        JSONB DEFAULT '{}',   -- extra event-specific data
+    metadata        JSONB DEFAULT '{}',
+    -- Additional fields not strictly in schema but useful for pipeline
+    frame_number    INTEGER,
+    bbox            JSONB,
     created_at      TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX idx_events_type ON events(event_type);
-CREATE INDEX idx_events_track ON events(track_id);
+CREATE INDEX idx_events_visitor ON events(visitor_id);
 CREATE INDEX idx_events_ts ON events(timestamp);
 CREATE INDEX idx_events_zone ON events(zone_id);
 

@@ -10,9 +10,9 @@ An enterprise-grade, real-time retail analytics platform powered by **YOLOv8** a
 
 Reviewers can access the live, fully functional platform deployed via secure tunnel directly linked to our Edge AI compute engine:
 
-- **Dashboard (Streamlit):** [https://26a47ebdb33e4a.lhr.life](https://26a47ebdb33e4a.lhr.life)
-- **API (FastAPI):** [https://b76658645ef6e3.lhr.life](https://b76658645ef6e3.lhr.life)
-- **Swagger Docs:** [https://b76658645ef6e3.lhr.life/docs](https://b76658645ef6e3.lhr.life/docs)
+- **Dashboard (Streamlit):** [http://16.171.193.153:8501](http://16.171.193.153:8501)
+- **API (FastAPI):** [http://16.171.193.153:8000](http://16.171.193.153:8000)
+- **Swagger Docs:** [http://16.171.193.153:8000/docs](http://16.171.193.153:8000/docs)
 
 *Note: The platform connects to real-time YOLOv8 inference servers. If the UI does not load immediately, refresh the page.*
 

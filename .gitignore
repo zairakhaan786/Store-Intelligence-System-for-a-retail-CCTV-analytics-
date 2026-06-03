@@ -58,6 +58,8 @@ data/*.mkv
 data/*.mov
 data/videos/
 data/raw/
+data/uploads/
+data/processed/
 
 # Model weights (large files)
 *.pt

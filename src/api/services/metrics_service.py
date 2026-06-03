@@ -51,8 +51,20 @@ class MetricsService:
 
         try:
             # ── Entry / Exit counts ───────────────────────────────────────
-            entry_result = db.execute(
-                text("""
+            if db.bind.dialect.name == "sqlite":
+                entry_query = """
+                    SELECT
+                        COUNT(CASE WHEN event_type = 'entry' THEN 1 END) AS entries,
+                        COUNT(CASE WHEN event_type = 'exit' THEN 1 END) AS exits,
+                        COUNT(CASE WHEN event_type = 'reentry' THEN 1 END) AS reentries,
+                        COUNT(CASE WHEN event_type = 'group_entry' THEN 1 END) AS group_entries,
+                        COUNT(DISTINCT CASE WHEN event_type = 'entry' THEN track_id END) AS unique_visitors
+                    FROM events
+                    WHERE date(timestamp) = date('now')
+                       OR TRUE
+                """
+            else:
+                entry_query = """
                     SELECT
                         COUNT(*) FILTER (WHERE event_type = 'entry') AS entries,
                         COUNT(*) FILTER (WHERE event_type = 'exit') AS exits,
@@ -62,8 +74,8 @@ class MetricsService:
                     FROM events
                     WHERE DATE(timestamp AT TIME ZONE 'UTC') = CURRENT_DATE
                        OR TRUE  -- show all data if no today data
-                """)
-            ).fetchone()
+                """
+            entry_result = db.execute(text(entry_query)).fetchone()
 
             total_entries = entry_result.entries or 0
             total_exits = entry_result.exits or 0
@@ -86,10 +98,8 @@ class MetricsService:
             avg_dwell = round(float(dwell_result.avg_dwell or 0), 2)
 
             # ── Active sessions (currently in store) ─────────────────────
-            active_result = db.execute(
-                text("SELECT COUNT(*) AS cnt FROM sessions WHERE is_complete = FALSE")
-            ).fetchone()
-            active_sessions = active_result.cnt or 0
+            # Based on the requirement: occupancy = entries - exits
+            active_sessions = max(0, total_entries + reentry_count - total_exits)
 
             # ── Staff count ───────────────────────────────────────────────
             staff_result = db.execute(
@@ -98,8 +108,20 @@ class MetricsService:
             staff_count = staff_result.cnt or 0
 
             # ── Peak occupancy (max concurrent sessions in 5-min window) ─
-            peak_result = db.execute(
-                text("""
+            if db.bind.dialect.name == "sqlite":
+                peak_query = """
+                    SELECT COALESCE(MAX(concurrent_count), 0) AS peak
+                    FROM (
+                        SELECT
+                            strftime('%Y-%m-%d %H:00:00', entry_time) AS window_start,
+                            COUNT(*) AS concurrent_count
+                        FROM sessions
+                        WHERE entry_time IS NOT NULL
+                        GROUP BY strftime('%Y-%m-%d %H:00:00', entry_time)
+                    ) sub
+                """
+            else:
+                peak_query = """
                     SELECT COALESCE(MAX(concurrent_count), 0) AS peak
                     FROM (
                         SELECT
@@ -109,20 +131,28 @@ class MetricsService:
                         WHERE entry_time IS NOT NULL
                         GROUP BY DATE_TRUNC('hour', entry_time)
                     ) sub
-                """)
-            ).fetchone()
+                """
+            peak_result = db.execute(text(peak_query)).fetchone()
             peak_occupancy = peak_result.peak or 0
 
             # ── Conversion rate: % of visitors who reached checkout ───────
-            conversion_result = db.execute(
-                text("""
+            if db.bind.dialect.name == "sqlite":
+                conversion_query = """
+                    SELECT
+                        COUNT(DISTINCT s.track_id) AS checkout_visitors
+                    FROM sessions s
+                    WHERE s.zones_visited LIKE '%CHECKOUT%'
+                      AND s.is_staff = 0
+                """
+            else:
+                conversion_query = """
                     SELECT
                         COUNT(DISTINCT s.track_id) AS checkout_visitors
                     FROM sessions s
                     WHERE s.zones_visited::text LIKE '%CHECKOUT%'
                       AND s.is_staff = FALSE
-                """)
-            ).fetchone()
+                """
+            conversion_result = db.execute(text(conversion_query)).fetchone()
             checkout_visitors = conversion_result.checkout_visitors or 0
             conversion_rate = (
                 round(checkout_visitors / unique_visitors, 4) if unique_visitors > 0 else 0.0
@@ -207,15 +237,24 @@ class MetricsService:
                 ("Exit", None),
             ]:
                 if zone_ids:
-                    result = db.execute(
-                        text("""
+                    if db.bind.dialect.name == "sqlite":
+                        query = f"""
                             SELECT COUNT(DISTINCT track_id)
                             FROM events
                             WHERE event_type IN ('zone_enter', 'zone_exit')
-                              AND zone_id = ANY(:zones)
-                        """),
-                        {"zones": zone_ids},
-                    ).scalar() or 0
+                              AND zone_id IN ({','.join(f"'{z}'" for z in zone_ids)})
+                        """
+                        result = db.execute(text(query)).scalar() or 0
+                    else:
+                        result = db.execute(
+                            text("""
+                                SELECT COUNT(DISTINCT track_id)
+                                FROM events
+                                WHERE event_type IN ('zone_enter', 'zone_exit')
+                                  AND zone_id = ANY(:zones)
+                            """),
+                            {"zones": zone_ids},
+                        ).scalar() or 0
                 else:
                     result = db.execute(
                         text("SELECT COUNT(DISTINCT track_id) FROM events WHERE event_type = 'exit'")
@@ -225,13 +264,30 @@ class MetricsService:
                 stages.append(FunnelStage(stage=stage_name, count=result, pct_from_entry=pct))
 
             # Average zones visited per session
-            avg_zones_result = db.execute(
-                text("""
-                    SELECT AVG(jsonb_array_length(zones_visited))
-                    FROM sessions
-                    WHERE is_complete = TRUE AND is_staff = FALSE
-                """)
-            ).scalar() or 0.0
+            if db.bind.dialect.name == "sqlite":
+                rows = db.execute(
+                    text("SELECT zones_visited FROM sessions WHERE is_complete = 1 AND is_staff = 0")
+                ).fetchall()
+                import json
+                lengths = []
+                for r in rows:
+                    try:
+                        zv = r[0]
+                        if isinstance(zv, str):
+                            zv = json.loads(zv)
+                        if isinstance(zv, list):
+                            lengths.append(len(zv))
+                    except Exception:
+                        pass
+                avg_zones_result = sum(lengths) / len(lengths) if lengths else 0.0
+            else:
+                avg_zones_result = db.execute(
+                    text("""
+                        SELECT AVG(jsonb_array_length(zones_visited))
+                        FROM sessions
+                        WHERE is_complete = TRUE AND is_staff = FALSE
+                    """)
+                ).scalar() or 0.0
 
             checkout_stage = next((s for s in stages if s.stage == "Checkout"), None)
             conv = round(checkout_stage.pct_from_entry / 100, 4) if checkout_stage else 0.0
@@ -248,32 +304,72 @@ class MetricsService:
             return FunnelResponse(stages=[], conversion_rate=0.0, avg_stages_per_visitor=0.0, date=None)
 
     def get_occupancy(self) -> OccupancyResponse:
-        """Return current zone occupancy from active sessions."""
+        """Return current store and zone occupancy based on entries - exits."""
         db = self._db
         try:
-            result = db.execute(
-                text("""
+            # First calculate store total: max(0, entries - exits)
+            if db.bind.dialect.name == "sqlite":
+                total_query = """
+                    SELECT 
+                        COUNT(CASE WHEN event_type IN ('entry', 'reentry') THEN 1 END) AS entries,
+                        COUNT(CASE WHEN event_type = 'exit' THEN 1 END) AS exits
+                    FROM events
+                """
+            else:
+                total_query = """
+                    SELECT 
+                        COUNT(*) FILTER (WHERE event_type IN ('entry', 'reentry')) AS entries,
+                        COUNT(*) FILTER (WHERE event_type = 'exit') AS exits
+                    FROM events
+                """
+            total_res = db.execute(text(total_query)).fetchone()
+            total_in_store = max(0, (total_res.entries or 0) - (total_res.exits or 0))
+
+            # For zones, we calculate zone_enter - zone_exit
+            if db.bind.dialect.name == "sqlite":
+                zone_query = """
                     SELECT
                         z.zone_id,
                         z.name,
                         z.zone_type,
                         z.capacity,
-                        COALESCE(s_cnt.cnt, 0) AS current_count
+                        COALESCE(e_cnt.entries, 0) - COALESCE(e_cnt.exits, 0) AS current_count
                     FROM zones z
                     LEFT JOIN (
-                        SELECT entry_zone, COUNT(*) AS cnt
-                        FROM sessions
-                        WHERE is_complete = FALSE
-                        GROUP BY entry_zone
-                    ) s_cnt ON z.zone_id = s_cnt.entry_zone
+                        SELECT 
+                            zone_id, 
+                            COUNT(CASE WHEN event_type IN ('zone_enter', 'entry', 'reentry') THEN 1 END) AS entries,
+                            COUNT(CASE WHEN event_type IN ('zone_exit', 'exit') THEN 1 END) AS exits
+                        FROM events
+                        GROUP BY zone_id
+                    ) e_cnt ON z.zone_id = e_cnt.zone_id
                     ORDER BY z.zone_id
-                """)
-            ).fetchall()
+                """
+            else:
+                zone_query = """
+                    SELECT
+                        z.zone_id,
+                        z.name,
+                        z.zone_type,
+                        z.capacity,
+                        COALESCE(e_cnt.entries, 0) - COALESCE(e_cnt.exits, 0) AS current_count
+                    FROM zones z
+                    LEFT JOIN (
+                        SELECT 
+                            zone_id, 
+                            COUNT(*) FILTER (WHERE event_type IN ('zone_enter', 'entry', 'reentry')) AS entries,
+                            COUNT(*) FILTER (WHERE event_type IN ('zone_exit', 'exit')) AS exits
+                        FROM events
+                        GROUP BY zone_id
+                    ) e_cnt ON z.zone_id = e_cnt.zone_id
+                    ORDER BY z.zone_id
+                """
+
+            result = db.execute(text(zone_query)).fetchall()
 
             zones = []
-            total = 0
             for row in result:
-                count = row.current_count or 0
+                count = max(0, row.current_count or 0)
                 cap = row.capacity or 1
                 util = round(count / cap * 100, 1)
                 zones.append(ZoneOccupancy(
@@ -284,11 +380,10 @@ class MetricsService:
                     capacity=cap,
                     utilization_pct=util,
                 ))
-                total += count
 
             return OccupancyResponse(
                 zones=zones,
-                total_in_store=total,
+                total_in_store=total_in_store,
                 timestamp=datetime.now(tz=timezone.utc),
             )
         except Exception as exc:
@@ -339,3 +434,125 @@ class MetricsService:
         except Exception as exc:
             logger.error("Heatmap query failed", error=str(exc))
             return HeatmapResponse(cells=[], max_visits=0, date=None)
+
+    def get_sales_metrics(self) -> dict:
+        """Retrieve aggregated sales performance metrics from transactions table."""
+        db = self._db
+        try:
+            # Check if table has data
+            has_data = db.execute(text("SELECT COUNT(*) FROM transactions")).scalar() or 0
+            if has_data == 0:
+                return {
+                    "total_orders": 0,
+                    "total_gmv": 0.0,
+                    "total_nmv": 0.0,
+                    "avg_order_value": 0.0,
+                    "top_brands": [],
+                    "salesperson_ranking": [],
+                    "hourly_sales": []
+                }
+
+            # Aggregated sales KPIs
+            sales_kpi = db.execute(
+                text("""
+                    SELECT
+                        COUNT(DISTINCT order_id) AS total_orders,
+                        SUM(gmv) AS total_gmv,
+                        SUM(nmv) AS total_nmv
+                    FROM transactions
+                """)
+            ).fetchone()
+
+            total_orders = sales_kpi.total_orders or 0
+            total_gmv = round(float(sales_kpi.total_gmv or 0), 2)
+            total_nmv = round(float(sales_kpi.total_nmv or 0), 2)
+            aov = round(total_nmv / total_orders, 2) if total_orders > 0 else 0.0
+
+            # Top selling brands
+            brands_result = db.execute(
+                text("""
+                    SELECT
+                        brand_name,
+                        SUM(qty) AS units_sold,
+                        SUM(nmv) AS revenue
+                    FROM transactions
+                    WHERE brand_name IS NOT NULL AND brand_name != 'None' AND brand_name != ''
+                    GROUP BY brand_name
+                    ORDER BY revenue DESC
+                    LIMIT 5
+                """)
+            ).fetchall()
+
+            top_brands = [
+                {"brand_name": r.brand_name, "units_sold": r.units_sold, "revenue": round(r.revenue, 2)}
+                for r in brands_result
+            ]
+
+            # Salesperson performance ranking
+            staff_result = db.execute(
+                text("""
+                    SELECT
+                        salesperson_name,
+                        COUNT(DISTINCT order_id) AS orders_placed,
+                        SUM(nmv) AS revenue
+                    FROM transactions
+                    WHERE salesperson_name IS NOT NULL AND salesperson_name != 'None' AND salesperson_name != ''
+                    GROUP BY salesperson_name
+                    ORDER BY revenue DESC
+                    LIMIT 5
+                """)
+            ).fetchall()
+
+            salesperson_ranking = [
+                {"salesperson_name": r.salesperson_name, "orders_placed": r.orders_placed, "revenue": round(r.revenue, 2)}
+                for r in staff_result
+            ]
+
+            # Hourly sales trend
+            if db.bind.dialect.name == "sqlite":
+                hourly_query = """
+                    SELECT
+                        substr(order_time, 1, 2) AS hour,
+                        COUNT(DISTINCT order_id) AS orders,
+                        SUM(nmv) AS revenue
+                    FROM transactions
+                    GROUP BY hour
+                    ORDER BY hour ASC
+                """
+            else:
+                hourly_query = """
+                    SELECT
+                        EXTRACT(HOUR FROM order_time::time)::text AS hour,
+                        COUNT(DISTINCT order_id) AS orders,
+                        SUM(nmv) AS revenue
+                    FROM transactions
+                    GROUP BY hour
+                    ORDER BY hour ASC
+                """
+            hourly_result = db.execute(text(hourly_query)).fetchall()
+            hourly_sales = [
+                {"hour": f"{int(r.hour):02d}:00", "orders": r.orders, "revenue": round(r.revenue, 2)}
+                for r in hourly_result if r.hour is not None and r.hour.strip().isdigit()
+            ]
+
+            return {
+                "total_orders": total_orders,
+                "total_gmv": total_gmv,
+                "total_nmv": total_nmv,
+                "avg_order_value": aov,
+                "top_brands": top_brands,
+                "salesperson_ranking": salesperson_ranking,
+                "hourly_sales": hourly_sales
+            }
+        except Exception as exc:
+            logger.error("Sales metrics computation failed", error=str(exc))
+            return {
+                "error": str(exc),
+                "total_orders": 0,
+                "total_gmv": 0.0,
+                "total_nmv": 0.0,
+                "avg_order_value": 0.0,
+                "top_brands": [],
+                "salesperson_ranking": [],
+                "hourly_sales": []
+            }

@@ -24,9 +24,10 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
+import supervision as sv
 
 from src.pipeline.detector import PersonDetector
 from src.pipeline.event_engine import EventEngine, StoreEvent
@@ -41,6 +42,17 @@ logger = get_logger(__name__)
 
 BATCH_FLUSH_FRAMES = 30
 SKIP_FRAMES = 2   # Process every Nth frame (skip 2 = process every 3rd)
+
+
+def _clean_for_json(obj: Any) -> Any:
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_clean_for_json(x) for x in obj]
+    elif hasattr(obj, "item"):
+        return obj.item()
+    return obj
 
 
 class VideoPipeline:
@@ -80,8 +92,11 @@ class VideoPipeline:
         self._running = False
 
         # Register shutdown handler
-        signal.signal(signal.SIGINT, self._shutdown)
-        signal.signal(signal.SIGTERM, self._shutdown)
+        try:
+            signal.signal(signal.SIGINT, self._shutdown)
+            signal.signal(signal.SIGTERM, self._shutdown)
+        except ValueError:
+            logger.warning("Could not register signal handlers (running in background thread)")
 
     def run(self, max_frames: Optional[int] = None) -> Dict:
         """
@@ -94,6 +109,7 @@ class VideoPipeline:
             Summary dict with statistics
         """
         import cv2
+        from pathlib import Path
 
         logger.info("Starting video pipeline", source=self._source, camera=self._camera_id)
         cap = cv2.VideoCapture(self._source)
@@ -107,9 +123,20 @@ class VideoPipeline:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
         logger.info("Video opened", fps=fps, size=f"{width}×{height}")
 
+        # Setup VideoWriter
+        out_dir = Path("data/processed")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{self._camera_id}_processed.mp4"
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out_writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+        logger.info("VideoWriter setup", path=str(out_path))
+
         self._start_time = time.time()
         self._running = True
         pending_events: List[StoreEvent] = []
+        
+        last_tracked = sv.Detections.empty()
+        last_events = []
 
         try:
             while self._running:
@@ -120,44 +147,47 @@ class VideoPipeline:
 
                 self._frame_count += 1
 
-                # Skip frames for CPU efficiency
-                if self._frame_count % (self._skip_frames + 1) != 0:
-                    continue
+                # If processed frame, run YOLO & Tracking
+                if self._frame_count % (self._skip_frames + 1) == 0:
+                    frame_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 or time.time()
+
+                    # ── Detection ─────────────────────────────────────────────
+                    detections = self._detector.detect(frame)
+
+                    # ── Tracking ──────────────────────────────────────────────
+                    tracked = self._tracker.update(detections, frame)
+
+                    # ── Face detection (optional) ─────────────────────────────
+                    if self._face_detector and len(tracked) > 0:
+                        face_dets = self._face_detector.detect(frame)
+
+                    # ── Event generation ──────────────────────────────────────
+                    events = self._event_engine.process_frame(tracked, frame, frame_timestamp)
+                    pending_events.extend(events)
+                    self._event_count += len(events)
+
+                    last_tracked = tracked
+                    last_events = events
+
+                    # ── Batch flush to DB ─────────────────────────────────────
+                    if len(pending_events) >= BATCH_FLUSH_FRAMES:
+                        self._flush_events(pending_events)
+                        pending_events.clear()
 
                 if max_frames and self._frame_count > max_frames:
                     break
 
-                frame_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 or time.time()
-
-                # ── Detection ─────────────────────────────────────────────
-                detections = self._detector.detect(frame)
-
-                # ── Tracking ──────────────────────────────────────────────
-                tracked = self._tracker.update(detections, frame)
-
-                # ── Face detection (optional) ─────────────────────────────
-                if self._face_detector and len(tracked) > 0:
-                    face_dets = self._face_detector.detect(frame)
-                    # Face analytics (count only, not stored separately here)
-
-                # ── Event generation ──────────────────────────────────────
-                events = self._event_engine.process_frame(tracked, frame, frame_timestamp)
-                pending_events.extend(events)
-                self._event_count += len(events)
-
-                # ── Batch flush to DB ─────────────────────────────────────
-                if len(pending_events) >= BATCH_FLUSH_FRAMES:
-                    self._flush_events(pending_events)
-                    pending_events.clear()
+                # Annotate and write frame (always write frame so video length matches input)
+                annotated = self._annotate_frame(frame, last_tracked, last_events)
+                out_writer.write(annotated)
 
                 # ── Optional visualization ────────────────────────────────
                 if self._enable_display:
-                    annotated = self._annotate_frame(frame, tracked, events)
                     cv2.imshow(f"Store Intelligence — {self._camera_id}", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 
-                # ── FPS logging every 100 processed frames ────────────────
+                # ── FPS logging every 300 processed frames ────────────────
                 if self._frame_count % 300 == 0:
                     elapsed = time.time() - self._start_time
                     proc_fps = self._frame_count / max(elapsed, 0.001)
@@ -175,6 +205,8 @@ class VideoPipeline:
             if pending_events:
                 self._flush_events(pending_events)
             cap.release()
+            out_writer.release()
+            logger.info("VideoWriter released", path=str(out_path))
             if self._enable_display:
                 import cv2
                 cv2.destroyAllWindows()
@@ -186,49 +218,85 @@ class VideoPipeline:
             "events_generated": self._event_count,
             "duration_seconds": round(elapsed, 2),
             "avg_fps": round(self._frame_count / max(elapsed, 0.001), 1),
+            "processed_video_path": str(out_path),
         }
         logger.info("Pipeline complete", **summary)
         return summary
 
     def _flush_events(self, events: List[StoreEvent]) -> None:
-        """Write event batch to PostgreSQL."""
+        """Write event batch to database (PostgreSQL or SQLite)."""
         if not events:
             return
         try:
-            import psycopg2
-            from psycopg2.extras import execute_values
-
-            rows = [(
-                str(uuid.uuid4()),
-                ev.event_type,
-                ev.track_id,
-                ev.session_id,
-                ev.camera_id,
-                ev.zone_id,
-                datetime.fromtimestamp(ev.timestamp, tz=timezone.utc),
-                ev.frame_number,
-                ev.confidence,
-                json.dumps(ev.bbox) if ev.bbox else None,
-                json.dumps(ev.metadata),
-            ) for ev in events]
-
-            conn = psycopg2.connect(self._db_url)
-            try:
-                with conn.cursor() as cur:
-                    execute_values(
-                        cur,
+            if "sqlite" in self._db_url:
+                import sqlite3
+                db_path = self._db_url.replace("sqlite:///", "").replace("sqlite://", "")
+                if not db_path:
+                    db_path = "store_intelligence.db"
+                conn = sqlite3.connect(db_path)
+                try:
+                    cursor = conn.cursor()
+                    rows = [(
+                        str(uuid.uuid4()),
+                        ev.event_type,
+                        ev.track_id,
+                        ev.session_id,
+                        ev.camera_id,
+                        ev.zone_id,
+                        datetime.fromtimestamp(ev.timestamp, tz=timezone.utc).isoformat(),
+                        ev.frame_number,
+                        ev.confidence,
+                        json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
+                        json.dumps(_clean_for_json(ev.metadata)),
+                    ) for ev in events]
+                    cursor.executemany(
                         """
-                        INSERT INTO events
+                        INSERT OR IGNORE INTO events
                             (id, event_type, track_id, session_id, camera_id, zone_id,
                              timestamp, frame_number, confidence, bbox, metadata)
-                        VALUES %s ON CONFLICT DO NOTHING
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         rows,
                     )
-                conn.commit()
-                logger.debug("Events flushed", count=len(rows))
-            finally:
-                conn.close()
+                    conn.commit()
+                    logger.debug("Events flushed (sqlite)", count=len(rows))
+                finally:
+                    conn.close()
+            else:
+                import psycopg2
+                from psycopg2.extras import execute_values
+
+                rows = [(
+                    str(uuid.uuid4()),
+                    ev.event_type,
+                    ev.track_id,
+                    ev.session_id,
+                    ev.camera_id,
+                    ev.zone_id,
+                    datetime.fromtimestamp(ev.timestamp, tz=timezone.utc),
+                    ev.frame_number,
+                    ev.confidence,
+                    json.dumps(_clean_for_json(ev.bbox)) if ev.bbox else None,
+                    json.dumps(_clean_for_json(ev.metadata)),
+                ) for ev in events]
+
+                conn = psycopg2.connect(self._db_url)
+                try:
+                    with conn.cursor() as cur:
+                        execute_values(
+                            cur,
+                            """
+                            INSERT INTO events
+                                (id, event_type, track_id, session_id, camera_id, zone_id,
+                                 timestamp, frame_number, confidence, bbox, metadata)
+                            VALUES %s ON CONFLICT DO NOTHING
+                            """,
+                            rows,
+                        )
+                    conn.commit()
+                    logger.debug("Events flushed", count=len(rows))
+                finally:
+                    conn.close()
         except Exception as exc:
             logger.error("Event flush failed", error=str(exc))
 
@@ -243,6 +311,18 @@ class VideoPipeline:
 
         annotated = frame.copy()
         h, w = frame.shape[:2]
+
+        # Draw Entry line (Green)
+        entry_y = int(settings.entry_line_y_ratio * h)
+        cv2.line(annotated, (0, entry_y), (w, entry_y), (0, 255, 0), 2)
+        cv2.putText(annotated, "ENTRY THRESHOLD LINE", (10, entry_y - 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+        # Draw Exit line (Red)
+        exit_y = int(settings.exit_line_y_ratio * h)
+        cv2.line(annotated, (0, exit_y), (w, exit_y), (0, 0, 255), 2)
+        cv2.putText(annotated, "EXIT THRESHOLD LINE", (w - 200, exit_y + 15),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         if tracked.tracker_id is not None:
             for i, tid in enumerate(tracked.tracker_id):
@@ -281,32 +361,17 @@ class VideoPipeline:
         self._running = False
 
 
-def run_demo_pipeline(db_url: Optional[str] = None, seconds: int = 30) -> Dict:
-    """
-    Run a synthetic pipeline demo (no video required).
-    Generates realistic detection sequences and persists events.
-    """
-    from src.pipeline.csv_processor import generate_synthetic_events
-    logger.info("Running synthetic demo pipeline", seconds=seconds)
-    n_visitors = max(5, seconds // 2)
-    count = generate_synthetic_events(db_url=db_url or settings.database_url, n_visitors=n_visitors)
-    return {"events_generated": count, "mode": "synthetic", "seconds": seconds}
+
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Store Intelligence Video Pipeline")
     parser.add_argument("--source", default="0", help="Video source: 0=webcam, file path, or RTSP URL")
     parser.add_argument("--camera-id", default="CAM_01", help="Camera identifier")
-    parser.add_argument("--demo", action="store_true", help="Run synthetic demo (no video)")
     parser.add_argument("--display", action="store_true", help="Show annotated video window")
     parser.add_argument("--max-frames", type=int, default=None, help="Stop after N frames")
     parser.add_argument("--skip-frames", type=int, default=2, help="Skip N frames between processing")
     args = parser.parse_args()
-
-    if args.demo:
-        result = run_demo_pipeline()
-        print(f"Demo complete: {result}")
-        sys.exit(0)
 
     source = int(args.source) if args.source.isdigit() else args.source
     pipeline = VideoPipeline(

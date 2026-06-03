@@ -33,6 +33,7 @@ from src.api.routers import anomalies, events, metrics
 from src.api.routers.funnel import router as pipeline_router
 from src.api.routers.visitors import router as visitors_router
 from src.api.routers.gestures import router as gestures_router
+from src.api.routers.challenge import router as challenge_router
 from src.shared.config import settings
 from src.shared.logger import configure_logging, get_logger
 
@@ -53,19 +54,8 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Database connection healthy")
 
-        # Auto-seed if empty
-        try:
-            from sqlalchemy import text
-            engine = get_engine()
-            with engine.connect() as conn:
-                count = conn.execute(text("SELECT COUNT(*) FROM events")).scalar()
-            if count == 0:
-                logger.info("Empty database detected — seeding with synthetic data")
-                from src.pipeline.csv_processor import generate_synthetic_events
-                n = generate_synthetic_events(n_visitors=50)
-                logger.info("Seeded database", events=n)
-        except Exception as exc:
-            logger.warning("Auto-seed skipped", reason=str(exc))
+        # Startup checks completed
+        pass
 
     yield
 
@@ -127,6 +117,7 @@ app.include_router(anomalies.router)
 app.include_router(pipeline_router)
 app.include_router(visitors_router)
 app.include_router(gestures_router)
+app.include_router(challenge_router)
 
 # ── Root & Health ─────────────────────────────────────────────────────────────
 

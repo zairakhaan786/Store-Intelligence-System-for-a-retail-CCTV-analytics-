@@ -168,17 +168,12 @@ class TestPipelineEndpoints:
         assert "running" in data
 
     def test_pipeline_run_triggers(self, api_client, monkeypatch):
-        """Pipeline run should accept request and return status."""
-        monkeypatch.setattr("src.api.routers.funnel._run_synthetic_pipeline", lambda *args, **kwargs: 10)
+        """Pipeline run should reject synthetic runs."""
         resp = api_client.post(
             "/pipeline/run",
             json={"camera_id": "CAM_01", "duration_seconds": 10, "use_synthetic": True},
         )
-        assert resp.status_code in (200, 409)  # 409 if already running
-        if resp.status_code == 200:
-            data = resp.json()
-            assert "status" in data
-            assert data["status"] in ("started", "running")
+        assert resp.status_code == 400
 
 
 class TestBusinessLogic:

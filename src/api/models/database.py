@@ -148,7 +148,31 @@ class MetricsSnapshotModel(Base):
     metadata_dict = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime(timezone=True), default=_utcnow)
 
-    __table_args__ = (UniqueConstraint("snapshot_time", "period", name="uq_snapshot"),)
+class TransactionModel(Base):
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    order_id = Column(String(100), nullable=False)
+    coupon_code = Column(String(100))
+    offer_name = Column(String(200))
+    invoice_number = Column(String(100))
+    order_date = Column(String(20))
+    order_time = Column(String(20))
+    store_id = Column(String(50))
+    store_name = Column(String(100))
+    customer_name = Column(String(100))
+    customer_number = Column(String(50))
+    sku = Column(String(100))
+    product_name = Column(String(300))
+    brand_name = Column(String(100))
+    dep_name = Column(String(100))
+    sub_category = Column(String(100))
+    qty = Column(Integer, default=1)
+    gmv = Column(Float, default=0.0)
+    nmv = Column(Float, default=0.0)
+    total_amount = Column(Float, default=0.0)
+    salesperson_name = Column(String(100))
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
 
 # ── Engine + Session Factory ──────────────────────────────────────────────────

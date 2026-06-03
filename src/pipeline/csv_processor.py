@@ -129,188 +129,135 @@ def ingest_csv(csv_path: str, db_url: str | None = None) -> int:
         return 0
 
     # Insert into DB
-    conn = psycopg2.connect(url)
-    try:
-        with conn.cursor() as cur:
-            execute_values(
-                cur,
+    if "sqlite" in url:
+        import sqlite3
+        db_path = url.replace("sqlite:///", "").replace("sqlite://", "")
+        if not db_path:
+            db_path = "store_intelligence.db"
+        conn = sqlite3.connect(db_path)
+        try:
+            cursor = conn.cursor()
+            sqlite_rows = []
+            for r in rows:
+                sqlite_rows.append((
+                    r[0],
+                    r[1],
+                    r[2],
+                    r[3],
+                    r[4],
+                    r[5].isoformat() if isinstance(r[5], datetime) else r[5],
+                    r[6],
+                    r[7]
+                ))
+            cursor.executemany(
                 """
-                INSERT INTO events (id, event_type, track_id, camera_id, zone_id, timestamp, confidence, metadata)
-                VALUES %s
-                ON CONFLICT DO NOTHING
+                INSERT OR IGNORE INTO events (id, event_type, track_id, camera_id, zone_id, timestamp, confidence, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                rows,
+                sqlite_rows,
             )
-        conn.commit()
-        logger.info("CSV ingested", rows=len(rows))
-    finally:
-        conn.close()
+            conn.commit()
+            logger.info("CSV ingested (sqlite)", rows=len(rows))
+        finally:
+            conn.close()
+    else:
+        conn = psycopg2.connect(url)
+        try:
+            with conn.cursor() as cur:
+                execute_values(
+                    cur,
+                    """
+                    INSERT INTO events (id, event_type, track_id, camera_id, zone_id, timestamp, confidence, metadata)
+                    VALUES %s
+                    ON CONFLICT DO NOTHING
+                    """,
+                    rows,
+                )
+            conn.commit()
+            logger.info("CSV ingested", rows=len(rows))
+        finally:
+            conn.close()
 
     return len(rows)
 
 
-def generate_synthetic_events(db_url: str | None = None, n_visitors: int = 50) -> int:
-    """
-    Generate synthetic event data for demonstration when no CSV is provided.
-    Simulates a realistic retail day with entries, zone visits, and exits.
-    """
-    import random
-    from datetime import timedelta
 
+
+def ingest_sales_csv(csv_path: str, db_url: str | None = None) -> int:
+    """
+    Ingest a sales transactions CSV into the transactions table.
+    Works for both SQLite and PostgreSQL.
+    """
+    import pandas as pd
+    from sqlalchemy import create_engine
+    
     url = db_url or settings.database_url
-    base_time = datetime(2026, 6, 1, 9, 0, 0, tzinfo=timezone.utc)
-    events = []
-    sessions = []
-
-    zone_sequence = [
-        ["ENTRY_MAIN", "AISLE_A", "BEAUTY_BAR", "CHECKOUT", "EXIT_MAIN"],
-        ["ENTRY_MAIN", "AISLE_B", "CHECKOUT", "EXIT_MAIN"],
-        ["ENTRY_MAIN", "AISLE_A", "AISLE_B", "EXIT_MAIN"],
-        ["ENTRY_MAIN", "BEAUTY_BAR", "EXIT_MAIN"],
-        ["ENTRY_MAIN", "CHECKOUT", "EXIT_MAIN"],
-        ["ENTRY_MAIN", "EXIT_MAIN"],  # quick exit
-    ]
-
-    staff_ids = [9901, 9902, 9903]
-
-    for visitor_num in range(n_visitors):
-        track_id = visitor_num + 1
-        is_staff = track_id in staff_ids
-        session_id = str(uuid.uuid4())
-
-        # Random entry time spread across store hours (9am–9pm)
-        entry_offset = random.randint(0, 43200)  # 12 hours
-        entry_time = base_time + timedelta(seconds=entry_offset)
-
-        # Random visitor journey
-        journey = random.choice(zone_sequence)
-        current_time = entry_time
-        zones_visited = []
-
-        for zone_id in journey:
-            event_type = "entry" if zone_id == journey[0] else (
-                "exit" if zone_id == journey[-1] else "zone_enter"
-            )
-            if zone_id == journey[0] and random.random() < 0.08:
-                event_type = "reentry"  # 8% chance of re-entry
-
-            events.append((
-                str(uuid.uuid4()),
-                event_type,
-                str(track_id),
-                session_id,
-                "CAM_01",
-                zone_id,
-                current_time,
-                None,  # frame_number
-                round(random.uniform(0.65, 0.98), 3),  # confidence
-                json.dumps({"bbox": {"x1": 0.2, "y1": 0.3, "x2": 0.4, "y2": 0.9}}),
-                json.dumps({"is_staff": is_staff, "session_index": 0}),
-            ))
-            zones_visited.append(zone_id)
-
-            # Dwell time per zone
-            if event_type not in ("exit",):
-                dwell = random.randint(30, 600)
-                current_time += timedelta(seconds=dwell)
-
-        exit_time = current_time
-        duration = (exit_time - entry_time).total_seconds()
-
-        sessions.append((
-            session_id,
-            str(track_id),
-            0,
-            entry_time,
-            exit_time,
-            round(duration, 2),
-            "CAM_01",
-            journey[0],
-            journey[-1],
-            json.dumps(zones_visited),
-            is_staff,
-            True,
-            json.dumps({}),
-        ))
-
-    # Add some group entry events
-    group_time = base_time + timedelta(hours=2)
-    for g in range(3):
-        events.append((
-            str(uuid.uuid4()),
-            "group_entry",
-            "GROUP",
-            None,
-            "CAM_01",
-            "ENTRY_MAIN",
-            group_time + timedelta(minutes=g * 45),
-            None,
-            1.0,
-            json.dumps({}),
-            json.dumps({"group_size": random.randint(3, 5)}),
-        ))
-
-    # Add anomaly events
-    events.append((
-        str(uuid.uuid4()),
-        "anomaly",
-        "TRACK_7",
-        None,
-        "CAM_01",
-        "ENTRY_MAIN",
-        base_time + timedelta(hours=3),
-        None,
-        0.9,
-        json.dumps({}),
-        json.dumps({"anomaly_type": "loitering", "severity": "medium", "dwell_seconds": 150}),
-    ))
-
-    conn = psycopg2.connect(url)
-    try:
-        with conn.cursor() as cur:
-            # Insert events
-            execute_values(
-                cur,
-                """
-                INSERT INTO events (id, event_type, track_id, session_id, camera_id, zone_id,
-                    timestamp, frame_number, confidence, bbox, metadata)
-                VALUES %s ON CONFLICT DO NOTHING
-                """,
-                events,
-            )
-            # Insert sessions
-            execute_values(
-                cur,
-                """
-                INSERT INTO sessions (id, track_id, session_index, entry_time, exit_time,
-                    duration_seconds, camera_id, entry_zone, exit_zone, zones_visited,
-                    is_staff, is_complete, metadata)
-                VALUES %s ON CONFLICT DO NOTHING
-                """,
-                sessions,
-            )
-        conn.commit()
-        logger.info("Synthetic data generated", events=len(events), sessions=len(sessions))
-    finally:
-        conn.close()
-
-    return len(events)
+    logger.info("Ingesting sales CSV", path=csv_path, db=url.split("@")[-1])
+    
+    # Load with pandas for easy handling of column conversions
+    df = pd.read_csv(csv_path)
+    
+    # Select columns that exist in the database model
+    cols_mapping = {
+        "order_id": "order_id",
+        "coupon_code": "coupon_code",
+        "offer_name": "offer_name",
+        "invoice_number": "invoice_number",
+        "order_date": "order_date",
+        "order_time": "order_time",
+        "store_id": "store_id",
+        "store_name": "store_name",
+        "customer_name": "customer_name",
+        "customer_number": "customer_number",
+        "sku": "sku",
+        "product_name": "product_name",
+        "brand_name": "brand_name",
+        "dep_name": "dep_name",
+        "sub_category": "sub_category",
+        "qty": "qty",
+        "GMV": "gmv",
+        "NMV": "nmv",
+        "total_amount": "total_amount",
+        "salesperson_name": "salesperson_name"
+    }
+    
+    # Filter columns that are present in the CSV
+    available_cols = {csv_col: db_col for csv_col, db_col in cols_mapping.items() if csv_col in df.columns}
+    df_filtered = df[list(available_cols.keys())].rename(columns=available_cols)
+    
+    # Clean string columns
+    for col in ["order_id", "coupon_code", "offer_name", "invoice_number", "order_date", "order_time", 
+                "store_id", "store_name", "customer_name", "customer_number", "sku", "product_name", 
+                "brand_name", "dep_name", "sub_category", "salesperson_name"]:
+        if col in df_filtered.columns:
+            df_filtered[col] = df_filtered[col].astype(str).str.strip().replace("nan", None)
+            
+    # Clean numeric columns
+    for col in ["qty"]:
+        if col in df_filtered.columns:
+            df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(1).astype(int)
+            
+    for col in ["gmv", "nmv", "total_amount"]:
+        if col in df_filtered.columns:
+            df_filtered[col] = pd.to_numeric(df_filtered[col], errors="coerce").fillna(0.0).astype(float)
+            
+    # Write to database using SQLAlchemy
+    engine = create_engine(url)
+    df_filtered.to_sql("transactions", con=engine, if_exists="append", index=False)
+    
+    logger.info("Sales CSV ingested successfully", rows=len(df_filtered))
+    return len(df_filtered)
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Ingest CCTV events from CSV")
     parser.add_argument("--csv", help="Path to CCTV event CSV file")
-    parser.add_argument("--synthetic", action="store_true", help="Generate synthetic data")
-    parser.add_argument("--visitors", type=int, default=50, help="Number of synthetic visitors")
     args = parser.parse_args()
 
     if args.csv:
         count = ingest_csv(args.csv)
         print(f"Ingested {count} events from CSV")
-    elif args.synthetic:
-        count = generate_synthetic_events(n_visitors=args.visitors)
-        print(f"Generated {count} synthetic events")
     else:
-        print("Use --csv <path> or --synthetic")
+        print("Use --csv <path>")
         sys.exit(1)

@@ -45,13 +45,13 @@ class Settings(BaseSettings):
     yolo_model: str = "yolov8n.pt"
     yolo_confidence: float = 0.35
     yolo_iou: float = 0.45
-    tracker_max_age: int = 30
+    tracker_max_age: int = 90
     tracker_min_hits: int = 3
     reentry_gap_seconds: int = 30
     group_entry_window_seconds: int = 2
     group_entry_min_size: int = 3
-    entry_line_y_ratio: float = 0.85
-    exit_line_y_ratio: float = 0.15
+    entry_line_y_ratio: float = 0.80
+    exit_line_y_ratio: float = 0.85
 
     # ── Dashboard ─────────────────────────────────────────────
     streamlit_port: int = 8501

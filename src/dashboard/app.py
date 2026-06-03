@@ -200,6 +200,28 @@ with st.sidebar:
                 st.error(f"Failed: {e}")
 
     st.divider()
+    st.markdown("### 🎥 Upload CCTV Video")
+    uploaded_video = st.file_uploader(
+        "Select video file",
+        type=["mp4", "avi", "mov", "mkv"],
+        help="Upload a CCTV feed video to run the detection and tracking pipeline."
+    )
+    if uploaded_video is not None:
+        if st.button("🚀 Process Video", use_container_width=True):
+            with st.spinner("Uploading and queueing video..."):
+                try:
+                    files = {"file": (uploaded_video.name, uploaded_video.getvalue(), "video/mp4")}
+                    r = httpx.post(f"{API_BASE}/pipeline/upload-video", files=files, timeout=60)
+                    if r.status_code == 200:
+                        res = r.json()
+                        st.success("✅ Video uploaded successfully!")
+                        st.info("The AI pipeline is now running in the background. Check logs or wait a bit, then refresh.")
+                    else:
+                        st.error(f"Failed: {r.status_code} - {r.text}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    st.divider()
     st.markdown(f"**Last updated:** {datetime.now().strftime('%H:%M:%S')}")
     st.markdown(f"**API:** `{API_BASE}`")
 
@@ -214,12 +236,13 @@ st.markdown("Real-time retail analytics powered by YOLOv8 + ByteTrack")
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Overview",
     "🔀 Funnel",
     "🗺️ Heatmap",
     "📋 Events",
     "⚠️ Anomalies",
+    "💰 Sales & Revenue",
 ])
 
 
@@ -275,37 +298,45 @@ with tab1:
 
         st.divider()
 
-        # Occupancy chart
-        st.markdown("### 🏪 Zone Occupancy")
-        occ_data = fetch_occupancy()
-        if occ_data.get("zones"):
-            occ_df = pd.DataFrame(occ_data["zones"])
-            fig = go.Figure()
-            colors = ["#7c3aed", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe", "#f5f3ff"]
-            for i, row in occ_df.iterrows():
-                pct = row.get("utilization_pct", 0)
-                color = colors[min(i, len(colors) - 1)]
-                fig.add_trace(go.Bar(
-                    name=row["name"],
-                    x=[row["name"]],
-                    y=[row["current_count"]],
-                    marker_color=color,
-                    text=f"{row['current_count']}/{row['capacity']} ({pct}%)",
-                    textposition="outside",
-                ))
+        # Two columns for Video & Occupancy
+        vcol1, vcol2 = st.columns([3, 2])
 
-            fig.update_layout(
-                title="Current Zone Occupancy",
-                showlegend=False,
-                plot_bgcolor="#0f1117",
-                paper_bgcolor="#0f1117",
-                font_color="#e2e8f0",
-                yaxis_title="People Count",
-                height=350,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No occupancy data available. Try seeding the database.")
+        with vcol1:
+            st.markdown("### 🎥 CCTV Live Analytics Feed")
+            video_url = f"{API_BASE}/pipeline/video/CAM_01"
+            st.video(video_url, format="video/mp4", start_time=0)
+
+        with vcol2:
+            st.markdown("### 🏪 Zone Occupancy")
+            occ_data = fetch_occupancy()
+            if occ_data.get("zones"):
+                occ_df = pd.DataFrame(occ_data["zones"])
+                fig = go.Figure()
+                colors = ["#7c3aed", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe", "#f5f3ff"]
+                for i, row in occ_df.iterrows():
+                    pct = row.get("utilization_pct", 0)
+                    color = colors[min(i, len(colors) - 1)]
+                    fig.add_trace(go.Bar(
+                        name=row["name"],
+                        x=[row["name"]],
+                        y=[row["current_count"]],
+                        marker_color=color,
+                        text=f"{row['current_count']}/{row['capacity']} ({pct}%)",
+                        textposition="outside",
+                    ))
+
+                fig.update_layout(
+                    title="Current Zone Occupancy",
+                    showlegend=False,
+                    plot_bgcolor="#0f1117",
+                    paper_bgcolor="#0f1117",
+                    font_color="#e2e8f0",
+                    yaxis_title="People Count",
+                    height=350,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No occupancy data available. Try uploading a CCTV video.")
 
 
 # ── Tab 2: Funnel ─────────────────────────────────────────────────────────────
@@ -527,6 +558,117 @@ with tab5:
     | Tailgating | ≥2 persons entering within 1.5s | Low |
     | Group Entry | ≥3 persons entering within 2s | Low |
     """)
+
+
+# ── Tab 6: Sales & Revenue ───────────────────────────────────────────────────
+with tab6:
+    st.markdown("### 💰 Store Sales & Financial Analytics")
+    st.caption("Correlate CCTV visitor footfall with point-of-sale transactions.")
+
+    # File uploader for sales data
+    uploaded_sales = st.file_uploader(
+        "Upload Sales CSV",
+        type=["csv", "tsv"],
+        help="Upload a sales transaction CSV to import purchase details.",
+        key="sales_uploader"
+    )
+    if uploaded_sales is not None:
+        if st.button("📥 Import Transactions", use_container_width=True):
+            with st.spinner("Importing sales data..."):
+                try:
+                    files = {"file": (uploaded_sales.name, uploaded_sales.getvalue(), "text/csv")}
+                    r = httpx.post(f"{API_BASE}/pipeline/upload-sales", files=files, timeout=60)
+                    if r.status_code == 200:
+                        st.success("✅ Sales transactions imported successfully!")
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to import: {r.status_code} - {r.text}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    st.divider()
+
+    # Fetch sales metrics
+    sales_data = {}
+    try:
+        r = httpx.get(f"{API_BASE}/metrics/sales", timeout=10)
+        if r.status_code == 200:
+            sales_data = r.json()
+    except Exception:
+        pass
+
+    if not sales_data or sales_data.get("total_orders", 0) == 0:
+        st.info("No sales transactions uploaded yet. Use the file uploader above to import your sales CSV.")
+    else:
+        # Sales KPIs
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("📦 Total Orders", f"{sales_data.get('total_orders', 0):,}")
+        with col2:
+            st.metric("💵 Total GMV (Gross)", f"₹{sales_data.get('total_gmv', 0.0):,}")
+        with col3:
+            st.metric("💸 Total NMV (Net)", f"₹{sales_data.get('total_nmv', 0.0):,}")
+        with col4:
+            st.metric("💳 Avg Order Value", f"₹{sales_data.get('avg_order_value', 0.0):,}")
+
+        st.divider()
+
+        # Graphs row
+        gcol1, gcol2 = st.columns(2)
+
+        with gcol1:
+            st.markdown("#### 🏆 Top Selling Brands")
+            tb = sales_data.get("top_brands", [])
+            if tb:
+                df_tb = pd.DataFrame(tb)
+                fig_tb = px.bar(
+                    df_tb,
+                    x="brand_name",
+                    y="revenue",
+                    text="units_sold",
+                    labels={"brand_name": "Brand", "revenue": "Net Revenue (₹)"},
+                    title="Revenue by Brand (Top 5)",
+                    color_discrete_sequence=["#8b5cf6"]
+                )
+                fig_tb.update_layout(plot_bgcolor="#0f1117", paper_bgcolor="#0f1117", font_color="#e2e8f0")
+                st.plotly_chart(fig_tb, use_container_width=True)
+            else:
+                st.write("No brand data.")
+
+        with gcol2:
+            st.markdown("#### 📈 Hourly Sales Trend")
+            hs = sales_data.get("hourly_sales", [])
+            if hs:
+                df_hs = pd.DataFrame(hs)
+                fig_hs = px.line(
+                    df_hs,
+                    x="hour",
+                    y="revenue",
+                    markers=True,
+                    labels={"hour": "Time of Day", "revenue": "Sales (₹)"},
+                    title="Sales Revenue by Hour",
+                    color_discrete_sequence=["#10b981"]
+                )
+                fig_hs.update_layout(plot_bgcolor="#0f1117", paper_bgcolor="#0f1117", font_color="#e2e8f0")
+                st.plotly_chart(fig_hs, use_container_width=True)
+            else:
+                st.write("No hourly trend data.")
+
+        st.divider()
+
+        st.markdown("#### 👩‍💼 Salesperson Performance Attributions")
+        sr = sales_data.get("salesperson_ranking", [])
+        if sr:
+            df_sr = pd.DataFrame(sr)
+            st.dataframe(
+                df_sr.rename(columns={
+                    "salesperson_name": "Salesperson",
+                    "orders_placed": "Orders Processed",
+                    "revenue": "Total Sales (₹)"
+                }),
+                use_container_width=True
+            )
 
 
 # ── Auto refresh ──────────────────────────────────────────────────────────────

@@ -186,4 +186,4 @@ class ZoneManager:
         Convention: person moves from low y (store) toward high y (exit).
         """
         ly = line_y or settings.exit_line_y_ratio
-        return prev_y_norm >= ly and curr_y_norm < ly
+        return prev_y_norm < ly and curr_y_norm >= ly

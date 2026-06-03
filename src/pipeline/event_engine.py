@@ -104,6 +104,8 @@ class EventEngine:
         self._sessions: Dict[str, Dict] = {}
         # Active track set (for detecting lost tracks)
         self._active_tracks: set = set()
+        # Set of track IDs that have successfully entered to prevent duplicate entry events
+        self._all_time_entered_ids: set = set()
         # Entry timestamp buffer for group detection
         self._entry_timestamps: List[float] = []
         # Event buffer (flushed to DB)
@@ -134,7 +136,6 @@ class EventEngine:
         events: List[StoreEvent] = []
 
         if tracked.tracker_id is None or len(tracked) == 0:
-            # Check for lost tracks (people who left frame)
             events.extend(self._handle_lost_tracks(set(), now))
             return events
 
@@ -160,125 +161,183 @@ class EventEngine:
             is_new_track = track_id not in self._track_state
 
             if is_new_track:
-                # ── Check for re-entry ────────────────────────────────────
-                reentry_info = self._reentry.check_reentry(
-                    track_id, bbox_norm, self._camera_id
-                )
-
-                session_id = str(uuid.uuid4())
-                session_index = 0
-                is_reentry = False
-
-                if reentry_info:
-                    original_tid, session_index = reentry_info
-                    is_reentry = True
-                    session_id = str(uuid.uuid4())
-
                 self._track_state[track_id] = {
                     "prev_cy_n": cy_n,
                     "zones_in": set(),
-                    "session_id": session_id,
-                    "session_index": session_index,
+                    "session_id": None,
+                    "session_index": 0,
                     "enter_time": now,
                     "has_entered": False,
                     "bbox_norm": bbox_norm,
-                    "is_reentry": is_reentry,
+                    "is_reentry": False,
+                    "lost_frames": 0,
                 }
-                self._sessions[session_id] = {
-                    "track_id": str(track_id),
-                    "entry_time": now,
-                    "exit_time": None,
-                    "zones_visited": [],
-                    "session_index": session_index,
-                }
+                logger.info(f"[INFO] Person ID {track_id} track initialized")
+            else:
+                self._track_state[track_id]["lost_frames"] = 0  # reset lost frames if found
 
-                # Emit entry or reentry event
-                ev_type = "reentry" if is_reentry else "entry"
-                self._entry_timestamps.append(now)
-                self._purge_entry_window(now)
-
-                entry_event = StoreEvent(
-                    event_type=ev_type,
-                    track_id=str(track_id),
-                    session_id=session_id,
-                    camera_id=self._camera_id,
-                    zone_id="ENTRY_MAIN",
-                    timestamp=now,
-                    frame_number=self._frame_count,
-                    confidence=confidence,
-                    bbox=bbox_dict,
-                    metadata={"session_index": session_index, "is_reentry": is_reentry},
-                )
-                events.append(entry_event)
-                self._event_buffer.append(entry_event)
-                logger.info("Entry event", track_id=track_id, type=ev_type)
-
-                # ── Group entry detection ─────────────────────────────────
-                group_events = self._check_group_entry(now, confidence, bbox_dict)
-                events.extend(group_events)
-
-            # ── Zone transition detection ──────────────────────────────────
             state = self._track_state[track_id]
-            current_zones = set(
-                self._zone_manager.get_zone_for_point(cx_n, cy_n)
-            )
-            prev_zones = state["zones_in"]
+            prev_cy_n = state["prev_cy_n"]
 
-            # Zones entered
-            for zone_id in current_zones - prev_zones:
-                zone_enter = StoreEvent(
-                    event_type="zone_enter",
-                    track_id=str(track_id),
-                    session_id=state["session_id"],
-                    camera_id=self._camera_id,
-                    zone_id=zone_id,
-                    timestamp=now,
-                    frame_number=self._frame_count,
-                    confidence=confidence,
-                    bbox=bbox_dict,
-                    metadata={"from_zones": list(prev_zones)},
-                )
-                events.append(zone_enter)
-                self._event_buffer.append(zone_enter)
-                self._anomaly.track_entered_zone(str(track_id), zone_id, now)
-                session = self._sessions.get(state["session_id"], {})
-                if zone_id not in session.get("zones_visited", []):
-                    session.setdefault("zones_visited", []).append(zone_id)
-
-            # Zones exited
-            for zone_id in prev_zones - current_zones:
-                zone_exit = StoreEvent(
-                    event_type="zone_exit",
-                    track_id=str(track_id),
-                    session_id=state["session_id"],
-                    camera_id=self._camera_id,
-                    zone_id=zone_id,
-                    timestamp=now,
-                    frame_number=self._frame_count,
-                    confidence=confidence,
-                    bbox=bbox_dict,
-                )
-                events.append(zone_exit)
-                self._event_buffer.append(zone_exit)
-                self._anomaly.track_exited_zone(str(track_id), zone_id)
-
-            # ── Anomaly checks ────────────────────────────────────────────
-            for zone_id in current_zones:
-                zone = self._zone_manager.get_zone(zone_id)
-                if zone:
-                    cap = zone.capacity
-                    # (simplified: we check per-track not full occupancy here)
-                    dwell_anoms = self._anomaly.check_dwell_anomalies(
-                        zone_id, [str(track_id)], now
+            # ── Check for Entry ───────────────────────────────────────────
+            if not state["has_entered"]:
+                if self._zone_manager.check_entry_line_crossing(prev_cy_n, cy_n):
+                    # Check for re-entry
+                    reentry_info = self._reentry.check_reentry(
+                        track_id, bbox_norm, self._camera_id
                     )
-                    for anom in dwell_anoms:
-                        anom_event = self._anomaly_to_event(anom, confidence, bbox_dict)
-                        events.append(anom_event)
-                        self._event_buffer.append(anom_event)
+                    session_id = str(uuid.uuid4())
+                    session_index = 0
+                    is_reentry = False
+
+                    if reentry_info:
+                        original_tid, session_index = reentry_info
+                        is_reentry = True
+
+                    state["has_entered"] = True
+                    state["session_id"] = session_id
+                    state["session_index"] = session_index
+                    state["is_reentry"] = is_reentry
+                    state["enter_time"] = now
+
+                    self._sessions[session_id] = {
+                        "track_id": str(track_id),
+                        "entry_time": now,
+                        "exit_time": None,
+                        "zones_visited": [],
+                        "session_index": session_index,
+                    }
+
+                    ev_type = "reentry" if is_reentry else "entry"
+                    
+                    # Ensure we only count entry ONCE per track ID, unless it's explicitly a reentry
+                    if track_id in self._all_time_entered_ids and not is_reentry:
+                        logger.debug(f"[INFO] Prevented duplicate entry for Person ID {track_id}")
+                    else:
+                        self._all_time_entered_ids.add(track_id)
+                        self._entry_timestamps.append(now)
+                        self._purge_entry_window(now)
+
+                        entry_event = StoreEvent(
+                            event_type=ev_type,
+                            track_id=str(track_id),
+                            session_id=session_id,
+                            camera_id=self._camera_id,
+                            zone_id="ENTRY_MAIN",
+                            timestamp=now,
+                            frame_number=self._frame_count,
+                            confidence=confidence,
+                            bbox=bbox_dict,
+                            metadata={"session_index": session_index, "is_reentry": is_reentry},
+                        )
+                        events.append(entry_event)
+                        self._event_buffer.append(entry_event)
+                        logger.info(f"[INFO] Person ID {track_id} entered ({ev_type.upper()} event generated)")
+
+                        # Group entry detection
+                        group_events = self._check_group_entry(now, confidence, bbox_dict)
+                        events.extend(group_events)
+                else:
+                    # Prevent duplicate log spam, just debug
+                    logger.debug(f"[INFO] Duplicate prevented for Person ID {track_id} before crossing")
+
+            # ── Check for Exit ────────────────────────────────────────────
+            elif state["has_entered"]:
+                if self._zone_manager.check_exit_line_crossing(prev_cy_n, cy_n):
+                    state["has_entered"] = False
+                    session_id = state["session_id"]
+
+                    self._reentry.record_exit(
+                        track_id=track_id,
+                        bbox_norm=bbox_norm,
+                        camera_id=self._camera_id,
+                        session_index=state.get("session_index", 0),
+                    )
+
+                    session = self._sessions.get(session_id, {})
+                    duration = now - session.get("entry_time", now)
+                    session["exit_time"] = now
+                    session["duration_seconds"] = duration
+
+                    exit_event = StoreEvent(
+                        event_type="exit",
+                        track_id=str(track_id),
+                        session_id=session_id,
+                        camera_id=self._camera_id,
+                        zone_id="EXIT_MAIN",
+                        timestamp=now,
+                        frame_number=self._frame_count,
+                        metadata={
+                            "duration_seconds": round(duration, 2),
+                            "zones_visited": session.get("zones_visited", []),
+                            "session_index": state.get("session_index", 0),
+                        },
+                    )
+                    events.append(exit_event)
+                    self._event_buffer.append(exit_event)
+                    logger.info(f"[INFO] Person ID {track_id} exited (EXIT event generated)")
+
+            # ── Zone transitions (only if entered) ────────────────────────
+            if state["has_entered"]:
+                current_zones = set(
+                    self._zone_manager.get_zone_for_point(cx_n, cy_n)
+                )
+                prev_zones = state["zones_in"]
+
+                # Zones entered
+                for zone_id in current_zones - prev_zones:
+                    zone_enter = StoreEvent(
+                        event_type="zone_enter",
+                        track_id=str(track_id),
+                        session_id=state["session_id"],
+                        camera_id=self._camera_id,
+                        zone_id=zone_id,
+                        timestamp=now,
+                        frame_number=self._frame_count,
+                        confidence=confidence,
+                        bbox=bbox_dict,
+                        metadata={"from_zones": list(prev_zones)},
+                    )
+                    events.append(zone_enter)
+                    self._event_buffer.append(zone_enter)
+                    self._anomaly.track_entered_zone(str(track_id), zone_id, now)
+                    session = self._sessions.get(state["session_id"], {})
+                    if zone_id not in session.get("zones_visited", []):
+                        session.setdefault("zones_visited", []).append(zone_id)
+
+                # Zones exited
+                for zone_id in prev_zones - current_zones:
+                    zone_exit = StoreEvent(
+                        event_type="zone_exit",
+                        track_id=str(track_id),
+                        session_id=state["session_id"],
+                        camera_id=self._camera_id,
+                        zone_id=zone_id,
+                        timestamp=now,
+                        frame_number=self._frame_count,
+                        confidence=confidence,
+                        bbox=bbox_dict,
+                    )
+                    events.append(zone_exit)
+                    self._event_buffer.append(zone_exit)
+                    self._anomaly.track_exited_zone(str(track_id), zone_id)
+
+                # Anomaly checks
+                for zone_id in current_zones:
+                    zone = self._zone_manager.get_zone(zone_id)
+                    if zone:
+                        dwell_anoms = self._anomaly.check_dwell_anomalies(
+                            zone_id, [str(track_id)], now
+                        )
+                        for anom in dwell_anoms:
+                            anom_event = self._anomaly_to_event(anom, confidence, bbox_dict)
+                            events.append(anom_event)
+                            self._event_buffer.append(anom_event)
+
+                state["zones_in"] = current_zones
 
             # ── Update state ──────────────────────────────────────────────
             state["prev_cy_n"] = cy_n
-            state["zones_in"] = current_zones
             state["bbox_norm"] = bbox_norm
 
         # ── Handle lost tracks (people who left frame) ─────────────────────
@@ -292,13 +351,24 @@ class EventEngine:
         current_track_ids: set,
         now: float,
     ) -> List[StoreEvent]:
-        """Emit exit events for tracks that are no longer visible."""
+        """Emit exit events for tracks that are no longer visible after max_age."""
         events = []
         lost = set(self._track_state.keys()) - current_track_ids
 
         for track_id in lost:
-            state = self._track_state.pop(track_id)
+            state = self._track_state[track_id]
+            state["lost_frames"] = state.get("lost_frames", 0) + 1
+
+            if state["lost_frames"] <= settings.tracker_max_age:
+                continue  # Keep state, don't exit yet
+
+            # Max age reached, retire the track
+            self._track_state.pop(track_id)
             self._active_tracks.discard(track_id)
+
+            if not state.get("has_entered", False):
+                logger.info(f"[INFO] Person ID {track_id} track dropped before entry")
+                continue
 
             # Record exit for re-entry detection
             self._reentry.record_exit(
@@ -312,6 +382,8 @@ class EventEngine:
             session_id = state["session_id"]
             session = self._sessions.get(session_id, {})
             duration = now - session.get("entry_time", now)
+            session["exit_time"] = now
+            session["duration_seconds"] = duration
 
             exit_event = StoreEvent(
                 event_type="exit",
@@ -329,7 +401,7 @@ class EventEngine:
             )
             events.append(exit_event)
             self._event_buffer.append(exit_event)
-            logger.info("Exit event", track_id=track_id, duration=round(duration, 2))
+            logger.info(f"[INFO] Person ID {track_id} exited (track lost for {state['lost_frames']} frames, EXIT event generated)")
 
         return events
 

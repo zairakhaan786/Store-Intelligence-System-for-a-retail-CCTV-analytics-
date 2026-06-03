@@ -47,3 +47,10 @@ async def get_heatmap(db: Session = Depends(get_db)) -> HeatmapResponse:
     """Return heatmap data based on zone visit frequency and dwell time."""
     svc = MetricsService(db)
     return svc.get_heatmap()
+
+
+@router.get("/sales", summary="Store sales metrics")
+async def get_sales_metrics(db: Session = Depends(get_db)) -> dict:
+    """Return store sales performance aggregated from uploaded transactions."""
+    svc = MetricsService(db)
+    return svc.get_sales_metrics()

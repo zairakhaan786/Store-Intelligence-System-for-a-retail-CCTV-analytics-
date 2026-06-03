@@ -32,7 +32,10 @@ async def list_gesture_events(
         params: dict = {}
 
         if gesture_type:
-            where_clause += " AND e.metadata->>'gesture_type' = :gesture_type"
+            if db.bind.dialect.name == "sqlite":
+                where_clause += " AND json_extract(e.metadata, '$.gesture_type') = :gesture_type"
+            else:
+                where_clause += " AND e.metadata->>'gesture_type' = :gesture_type"
             params["gesture_type"] = gesture_type
 
         total = db.execute(
@@ -70,8 +73,18 @@ async def list_gesture_events(
             })
 
         # Summary stats
-        gesture_counts = db.execute(
-            text("""
+        if db.bind.dialect.name == "sqlite":
+            gesture_counts_query = """
+                SELECT
+                    json_extract(metadata, '$.gesture_type') AS gesture_type,
+                    COUNT(*) AS cnt
+                FROM events
+                WHERE event_type = 'gesture_triggered'
+                GROUP BY json_extract(metadata, '$.gesture_type')
+                ORDER BY cnt DESC
+            """
+        else:
+            gesture_counts_query = """
                 SELECT
                     metadata->>'gesture_type' AS gesture_type,
                     COUNT(*) AS cnt
@@ -79,8 +92,8 @@ async def list_gesture_events(
                 WHERE event_type = 'gesture_triggered'
                 GROUP BY metadata->>'gesture_type'
                 ORDER BY cnt DESC
-            """)
-        ).fetchall()
+            """
+        gesture_counts = db.execute(text(gesture_counts_query)).fetchall()
 
         return {
             "gestures": gestures,
@@ -113,13 +126,22 @@ async def trigger_gesture(
     import uuid
     try:
         import json
-        db.execute(
-            text("""
+        if db.bind.dialect.name == "sqlite":
+            query = """
+                INSERT INTO events (id, event_type, track_id, camera_id, zone_id,
+                    timestamp, confidence, metadata)
+                VALUES (:id, 'gesture_triggered', 'GESTURE_USER', 'WEBCAM', NULL,
+                    CURRENT_TIMESTAMP, :confidence, :metadata)
+            """
+        else:
+            query = """
                 INSERT INTO events (id, event_type, track_id, camera_id, zone_id,
                     timestamp, confidence, metadata)
                 VALUES (:id, 'gesture_triggered', 'GESTURE_USER', 'WEBCAM', NULL,
                     NOW(), :confidence, :metadata::jsonb)
-            """),
+            """
+        db.execute(
+            text(query),
             {
                 "id": str(uuid.uuid4()),
                 "confidence": confidence,

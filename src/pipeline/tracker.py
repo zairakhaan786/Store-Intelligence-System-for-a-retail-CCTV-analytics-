@@ -46,7 +46,7 @@ class PersonTracker:
             track_activation_threshold=self._min_confidence,
             lost_track_buffer=self._max_age,
             minimum_matching_threshold=0.8,
-            minimum_consecutive_frames=self._min_hits,
+            minimum_consecutive_frames=5,
         )
         self._frame_count = 0
         logger.info(
@@ -83,7 +83,7 @@ class PersonTracker:
             track_activation_threshold=self._min_confidence,
             lost_track_buffer=self._max_age,
             minimum_matching_threshold=0.8,
-            minimum_consecutive_frames=self._min_hits,
+            minimum_consecutive_frames=5,
         )
         self._frame_count = 0
         logger.info("Tracker reset")

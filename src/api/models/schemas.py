@@ -29,10 +29,34 @@ class EventOut(BaseModel):
     timestamp: datetime
     frame_number: Optional[int]
     confidence: Optional[float]
-    bbox: Optional[Dict[str, float]]
+    bbox: Optional[Dict[str, float]] = None
     metadata_dict: Optional[Dict[str, Any]] = Field(default=None, serialization_alias="metadata", validation_alias=AliasChoices("metadata_dict", "metadata"))
 
     model_config = {"from_attributes": True}
+
+    @field_validator("bbox", mode="before")
+    @classmethod
+    def parse_bbox(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            import json
+            try:
+                v = json.loads(v)
+            except Exception:
+                pass
+        if isinstance(v, dict) and "bbox" in v:
+            return v["bbox"]
+        return v
+
+    @field_validator("metadata_dict", mode="before")
+    @classmethod
+    def parse_metadata(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except Exception:
+                return {}
+        return v
 
 
 class EventListResponse(BaseModel):
@@ -110,6 +134,17 @@ class AnomalyOut(BaseModel):
     is_active: bool
 
     model_config = {"from_attributes": True}
+
+    @field_validator("metadata_dict", mode="before")
+    @classmethod
+    def parse_metadata(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except Exception:
+                return {}
+        return v
 
 
 class AnomalyListResponse(BaseModel):

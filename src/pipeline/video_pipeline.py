@@ -1,3 +1,4 @@
+
 """
 OpenCV Video Pipeline — full end-to-end CCTV processing.
 
@@ -7,7 +8,6 @@ Usage:
     python -m src.pipeline.video_pipeline --source 0           # webcam
     python -m src.pipeline.video_pipeline --source video.mp4   # video file
     python -m src.pipeline.video_pipeline --source rtsp://...  # RTSP stream
-    python -m src.pipeline.video_pipeline --demo               # synthetic demo (no video)
 
 Design:
 - Frame-by-frame processing with configurable skip_frames for CPU efficiency
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import os
+
 os.environ["TORCH_FORCE_WEIGHTS_ONLY_LOAD"] = "0"
 import json
 import signal
@@ -28,6 +29,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import cv2
 import numpy as np
 import supervision as sv
 
@@ -111,7 +113,6 @@ class VideoPipeline:
         Returns:
             Summary dict with statistics
         """
-        import cv2
         from pathlib import Path
 
         logger.info("Starting video pipeline", source=self._source, camera=self._camera_id)
@@ -127,18 +128,32 @@ class VideoPipeline:
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
         logger.info("Video opened", fps=fps, size=f"{width}×{height}")
 
-        # Setup VideoWriter
+        # Setup VideoWriter with fallback codec
         out_dir = Path("data/processed")
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / f"{self._camera_id}_processed.mp4"
-        fourcc = cv2.VideoWriter_fourcc(*"avc1")
-        out_writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
-        logger.info("VideoWriter setup", path=str(out_path))
+
+        # Try different codecs in order
+        codecs = ["avc1", "mp4v", "X264"]
+        out_writer = None
+        for codec in codecs:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            test_writer = cv2.VideoWriter(str(out_path), fourcc, fps, (width, height))
+            if test_writer.isOpened():
+                out_writer = test_writer
+                logger.info(f"VideoWriter using codec {codec}", path=str(out_path))
+                break
+            test_writer.release()
+
+        if out_writer is None:
+            logger.error("Could not open VideoWriter with any codec")
+            cap.release()
+            return {"error": "VideoWriter failed"}
 
         self._start_time = time.time()
         self._running = True
         pending_events: List[StoreEvent] = []
-        
+
         last_tracked = sv.Detections.empty()
         last_events = []
 
@@ -158,15 +173,9 @@ class VideoPipeline:
                 if self._frame_count % (self._skip_frames + 1) == 0:
                     frame_timestamp = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0 or time.time()
 
-                    # ── Detection ─────────────────────────────────────────────
                     detections = self._detector.detect(frame)
-
-                    # ── Tracking ──────────────────────────────────────────────
                     tracked = self._tracker.update(detections, frame)
 
-
-
-                    # ── Event generation ──────────────────────────────────────
                     events = self._event_engine.process_frame(tracked, frame, frame_timestamp)
                     pending_events.extend(events)
                     self._event_count += len(events)
@@ -174,11 +183,10 @@ class VideoPipeline:
                     last_tracked = tracked
                     last_events = events
 
-                    # ── Batch flush to DB ─────────────────────────────────────
+                    # Batch flush to API
                     if len(pending_events) >= BATCH_FLUSH_FRAMES:
                         self._flush_events(pending_events)
                         pending_events.clear()
-                        self._event_engine.flush_buffer()  # clear redundant internal buffer
 
                 if max_frames and self._frame_count > max_frames:
                     break
@@ -186,17 +194,15 @@ class VideoPipeline:
                 if progress_callback and self._frame_count % 5 == 0:
                     progress_callback(self._frame_count, total_frames, "Processing video...")
 
-                # Annotate and write frame (always write frame so video length matches input)
+                # Annotate and write frame
                 annotated = self._annotate_frame(frame, last_tracked, last_events)
                 out_writer.write(annotated)
 
-                # ── Optional visualization ────────────────────────────────
                 if self._enable_display:
                     cv2.imshow(f"Store Intelligence — {self._camera_id}", annotated)
                     if cv2.waitKey(1) & 0xFF == ord("q"):
                         break
 
-                # ── FPS logging every 300 processed frames ────────────────
                 if self._frame_count % 300 == 0:
                     elapsed = time.time() - self._start_time
                     proc_fps = self._frame_count / max(elapsed, 0.001)
@@ -210,21 +216,21 @@ class VideoPipeline:
         except Exception as exc:
             logger.error("Pipeline error", error=str(exc), exc_info=True)
         finally:
-            # Force close all remaining active sessions to calculate final dwell times
+            # Close all sessions and get final events
             final_events = self._event_engine.force_close_all_sessions(time.time())
             pending_events.extend(final_events)
-            
-            # Flush remaining events
+
+            # Flush any remaining events
             if pending_events:
                 self._flush_events(pending_events)
-                pending_events.clear()
-            self._event_engine.flush_buffer()  # clear any remaining redundant buffer
-                
+
+            # Release resources
             cap.release()
             out_writer.release()
-            logger.info("VideoWriter released", path=str(out_path))
-            
-            # Explicitly delete models to prevent macOS ARM64 background thread GC segfaults
+            if self._enable_display:
+                cv2.destroyAllWindows()
+
+            # Explicitly delete models to prevent macOS segfaults on exit
             try:
                 del self._detector
                 del self._tracker
@@ -232,36 +238,11 @@ class VideoPipeline:
                     del self._face_detector
             except Exception:
                 pass
-            
-            # Post-process with FFmpeg for web compatibility
-            try:
-                import os
-                import shutil
-                import sys
-                import subprocess
-                
-                ffmpeg_path = shutil.which("ffmpeg")
-                if ffmpeg_path:
-                    temp_path = out_path.with_name(out_path.stem + "_temp.mp4")
-                    args = [
-                        "ffmpeg", "-y", "-i", str(out_path),
-                        "-vcodec", "copy", "-acodec", "copy",
-                        "-movflags", "faststart", str(temp_path)
-                    ]
-                    
-                    if sys.platform == "win32":
-                        subprocess.run(args, check=True)
-                    else:
-                        # os.posix_spawn completely avoids fork() which causes the macOS crash
-                        pid = os.posix_spawn(ffmpeg_path, args, dict(os.environ))
-                        os.waitpid(pid, 0)
-                    
-                    os.replace(str(temp_path), str(out_path))
-                    logger.info("Video web-optimized with FFmpeg (faststart)", path=str(out_path))
-                else:
-                    logger.warning("FFmpeg not found in PATH, skipping web-optimization")
-            except Exception as ffmpeg_err:
-                logger.warning(f"FFmpeg web-optimization failed: {ffmpeg_err}")
+
+            # NOTE: FFmpeg optimization removed because subprocess calls (fork)
+            # crash on macOS when the process has multiple threads (YOLO, OpenCV, etc.)
+            # The saved video is still valid; it just lacks web-optimized metadata.
+            logger.info("Video saved (without FFmpeg optimization) to avoid fork crash")
 
         elapsed = time.time() - self._start_time
         summary = {
@@ -273,14 +254,14 @@ class VideoPipeline:
             "processed_video_path": str(out_path),
         }
         logger.info("Pipeline complete", **summary)
-        
+
         if progress_callback:
             progress_callback(self._frame_count, total_frames, "Processing complete!")
-            
+
         return summary
 
     def _flush_events(self, events: List[StoreEvent]) -> None:
-        """Send event batch to the REST API for processing and session creation."""
+        """Send event batch to the REST API."""
         if not events:
             return
         try:
@@ -300,7 +281,6 @@ class VideoPipeline:
                     "confidence": ev.confidence,
                     "metadata": {"frame_number": ev.frame_number, "bbox": ev.bbox}
                 })
-            
             resp = requests.post("http://127.0.0.1:8000/events/ingest", json=payload, timeout=10)
             if resp.status_code == 200:
                 logger.debug("Events flushed via API", count=len(events))
@@ -309,12 +289,11 @@ class VideoPipeline:
                 self._write_dlq(payload)
         except Exception as exc:
             logger.error("Event flush failed", error=str(exc))
-            # If payload is defined but request failed, write to DLQ
             if 'payload' in locals() and payload:
                 self._write_dlq(payload)
 
     def _write_dlq(self, payload: List[Dict]) -> None:
-        """Write failed events to a Dead Letter Queue for later recovery."""
+        """Write failed events to Dead Letter Queue."""
         try:
             import json
             from pathlib import Path
@@ -334,18 +313,16 @@ class VideoPipeline:
         events: List[StoreEvent],
     ) -> np.ndarray:
         """Draw bounding boxes, track IDs, and event labels on frame."""
-        import cv2
-
         annotated = frame.copy()
         h, w = frame.shape[:2]
 
-        # Draw Entry line (Green)
+        # Entry line (green)
         entry_y = int(settings.entry_line_y_ratio * h)
         cv2.line(annotated, (0, entry_y), (w, entry_y), (0, 255, 0), 2)
         cv2.putText(annotated, "ENTRY THRESHOLD LINE", (10, entry_y - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-        # Draw Exit line (Red)
+        # Exit line (red)
         exit_y = int(settings.exit_line_y_ratio * h)
         cv2.line(annotated, (0, exit_y), (w, exit_y), (0, 0, 255), 2)
         cv2.putText(annotated, "EXIT THRESHOLD LINE", (w - 200, exit_y + 15),
@@ -357,13 +334,12 @@ class VideoPipeline:
                 x1, y1, x2, y2 = bbox
                 color = self._id_to_color(int(tid))
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                label = f"ID:{tid}"
-                cv2.putText(annotated, label, (x1, y1 - 8),
+                cv2.putText(annotated, f"ID:{tid}", (x1, y1 - 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-        # Show recent events as overlay
+        # Show recent events
         y_offset = 30
-        for ev in events[-5:]:  # show last 5 events
+        for ev in events[-5:]:
             text = f"{ev.event_type.upper()} | T:{ev.track_id} | Z:{ev.zone_id}"
             cv2.putText(annotated, text, (10, y_offset),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
@@ -385,9 +361,6 @@ class VideoPipeline:
     def _shutdown(self, signum, frame):
         logger.info("Shutdown signal received")
         self._running = False
-
-
-
 
 
 if __name__ == "__main__":

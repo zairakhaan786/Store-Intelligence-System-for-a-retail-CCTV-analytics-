@@ -63,11 +63,10 @@ open http://localhost:8000/docs
 ## 🎥 Video Upload & Testing Instructions
 
 1. Navigate to the **Dashboard**.
-2. Click **"🌱 Seed Data"** in the left sidebar to instantly populate the database with 127 highly realistic synthetic visitor sessions (perfect for UI validation).
-3. Alternatively, use the **Upload CCTV Video** widget in the sidebar.
-4. Select a `.mp4` video.
-5. Click **"🚀 Process Video"**. The video is uploaded to the backend and the YOLOv8 pipeline begins processing in the background asynchronously.
-6. Watch the metrics (Entries, Anomalies, Funnel) update dynamically on the dashboard!
+2. Use the **Upload CCTV Video** widget in the sidebar.
+3. Select a `.mp4` video.
+4. Click **"🚀 Process Video"**. The video is uploaded to the backend and the YOLOv8 pipeline begins processing in the background asynchronously.
+5. Watch the metrics (Entries, Anomalies, Funnel) update dynamically on the dashboard!
 
 ---
 

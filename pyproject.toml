@@ -19,3 +19,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise NotImplementedError",
 ]
+
+[tool.pyright]
+include = ["src"]
+extraPaths = ["."]

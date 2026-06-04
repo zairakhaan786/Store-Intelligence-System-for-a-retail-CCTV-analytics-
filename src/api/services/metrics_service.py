@@ -58,7 +58,7 @@ class MetricsService:
                         COUNT(CASE WHEN event_type = 'exit' THEN 1 END) AS exits,
                         COUNT(CASE WHEN event_type = 'reentry' THEN 1 END) AS reentries,
                         COUNT(CASE WHEN event_type = 'group_entry' THEN 1 END) AS group_entries,
-                        COUNT(DISTINCT CASE WHEN event_type = 'entry' THEN track_id END) AS unique_visitors
+                        COUNT(DISTINCT CASE WHEN event_type = 'entry' THEN visitor_id END) AS unique_visitors
                     FROM events
                     WHERE date(timestamp) = date('now')
                        OR TRUE
@@ -70,7 +70,7 @@ class MetricsService:
                         COUNT(*) FILTER (WHERE event_type = 'exit') AS exits,
                         COUNT(*) FILTER (WHERE event_type = 'reentry') AS reentries,
                         COUNT(*) FILTER (WHERE event_type = 'group_entry') AS group_entries,
-                        COUNT(DISTINCT track_id) FILTER (WHERE event_type = 'entry') AS unique_visitors
+                        COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'entry') AS unique_visitors
                     FROM events
                     WHERE DATE(timestamp AT TIME ZONE 'UTC') = CURRENT_DATE
                        OR TRUE  -- show all data if no today data
@@ -225,7 +225,7 @@ class MetricsService:
 
         try:
             entry_count = db.execute(
-                text("SELECT COUNT(DISTINCT track_id) FROM events WHERE event_type = 'entry'")
+                text("SELECT COUNT(DISTINCT visitor_id) FROM events WHERE event_type = 'entry'")
             ).scalar() or 0
 
             stages = [FunnelStage(stage="Entry", count=entry_count, pct_from_entry=100.0)]
@@ -239,7 +239,7 @@ class MetricsService:
                 if zone_ids:
                     if db.bind.dialect.name == "sqlite":
                         query = f"""
-                            SELECT COUNT(DISTINCT track_id)
+                            SELECT COUNT(DISTINCT visitor_id)
                             FROM events
                             WHERE event_type IN ('zone_enter', 'zone_exit')
                               AND zone_id IN ({','.join(f"'{z}'" for z in zone_ids)})
@@ -248,7 +248,7 @@ class MetricsService:
                     else:
                         result = db.execute(
                             text("""
-                                SELECT COUNT(DISTINCT track_id)
+                                SELECT COUNT(DISTINCT visitor_id)
                                 FROM events
                                 WHERE event_type IN ('zone_enter', 'zone_exit')
                                   AND zone_id = ANY(:zones)
@@ -257,7 +257,7 @@ class MetricsService:
                         ).scalar() or 0
                 else:
                     result = db.execute(
-                        text("SELECT COUNT(DISTINCT track_id) FROM events WHERE event_type = 'exit'")
+                        text("SELECT COUNT(DISTINCT visitor_id) FROM events WHERE event_type = 'exit'")
                     ).scalar() or 0
 
                 pct = round(result / entry_count * 100, 1) if entry_count > 0 else 0.0

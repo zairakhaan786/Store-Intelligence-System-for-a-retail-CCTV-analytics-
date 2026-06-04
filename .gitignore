@@ -92,3 +92,6 @@ scratch/
 .DS_Store
 .AppleDouble
 .LSOverride
+
+Not_To_be_pushed/
+

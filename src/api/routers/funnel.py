@@ -16,7 +16,12 @@ from src.shared.logger import get_logger
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 logger = get_logger(__name__)
 
-_pipeline_running = False
+_pipeline_status = {
+    "running": False,
+    "frames_processed": 0,
+    "total_frames": 0,
+    "message": "Idle"
+}
 
 
 @router.post("/run", response_model=PipelineRunResponse, summary="Trigger pipeline")
@@ -37,7 +42,7 @@ async def run_pipeline(
 async def get_status() -> dict:
     """Return current pipeline execution status."""
     return {
-        "running": _pipeline_running,
+        "status": _pipeline_status,
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
     }
 
@@ -131,6 +136,17 @@ async def upload_video(
     def _run_pipeline_task():
         from src.pipeline.video_pipeline import VideoPipeline
         from src.shared.config import settings
+        
+        _pipeline_status["running"] = True
+        _pipeline_status["frames_processed"] = 0
+        _pipeline_status["total_frames"] = 0
+        _pipeline_status["message"] = "Starting AI pipeline..."
+        
+        def progress_callback(processed: int, total: int, msg: str):
+            _pipeline_status["frames_processed"] = processed
+            _pipeline_status["total_frames"] = total
+            _pipeline_status["message"] = msg
+
         try:
             logger.info("Starting VideoPipeline on uploaded file", path=str(file_path))
             pipeline = VideoPipeline(
@@ -141,10 +157,13 @@ async def upload_video(
                 enable_display=False,
                 skip_frames=2
             )
-            result = pipeline.run()
+            result = pipeline.run(progress_callback=progress_callback)
             logger.info("VideoPipeline completed on uploaded file", result=result)
         except Exception as exc:
             logger.error("VideoPipeline execution failed", error=str(exc))
+            _pipeline_status["message"] = f"Error: {exc}"
+        finally:
+            _pipeline_status["running"] = False
             
     background_tasks.add_task(_run_pipeline_task)
     

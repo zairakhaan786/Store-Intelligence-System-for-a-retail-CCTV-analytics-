@@ -246,11 +246,11 @@ class GestureController:
             zoom_result = self._check_zoom(hand_data[0]["centroid"], hand_data[1]["centroid"])
             if zoom_result is not None:
                 gesture_type, confidence = zoom_result
-
-        # Swipe detection (single hand velocity)
-        swipe_result = self._check_swipe(primary["centroid"])
-        if swipe_result is not None:
-            gesture_type, confidence = swipe_result
+        elif len(hand_data) == 1:
+            # Swipe detection (single hand velocity)
+            swipe_result = self._check_swipe(primary["centroid"])
+            if swipe_result is not None:
+                gesture_type, confidence = swipe_result
 
         if gesture_type == GestureType.NONE:
             return None

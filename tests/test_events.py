@@ -1,5 +1,8 @@
 """
 Tests for event generation and business logic.
+
+# PROMPT: Create robust tests for the event generation pipeline. Test entry events on new tracks, exit events on track loss (timeout), multiple simultaneous entries, group entry logic, and bounding box validation. Also cover CSV parsing edge cases.
+# CHANGES MADE: Modified the `test_exit_event_on_track_loss` test to aggregate events across the entire track timeout simulation loop, as the previous version only checked the returned events from the final iteration.
 """
 from __future__ import annotations
 
@@ -71,10 +74,12 @@ class TestEventGeneration:
         engine.process_frame(det2, frame)
 
         # Simulate timeout (default max_age is 90, so we call empty 91 times)
+        all_events = []
         for _ in range(92):
             events = engine.process_frame(sv.Detections.empty(), frame)
+            all_events.extend(events)
             
-        exit_events = [e for e in events if e.event_type == "exit"]
+        exit_events = [e for e in all_events if e.event_type == "exit"]
         assert len(exit_events) == 1
         assert exit_events[0].track_id == "42"
 

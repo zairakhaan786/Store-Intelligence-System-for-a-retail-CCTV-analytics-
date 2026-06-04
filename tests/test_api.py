@@ -168,7 +168,8 @@ class TestPipelineEndpoints:
         resp = api_client.get("/pipeline/status")
         assert resp.status_code == 200
         data = resp.json()
-        assert "running" in data
+        assert "status" in data
+        assert "running" in data["status"]
 
     def test_pipeline_run_triggers(self, api_client, monkeypatch):
         """Pipeline run should reject synthetic runs."""

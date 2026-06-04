@@ -41,12 +41,13 @@ class PersonTracker:
         self._max_age = max_age or settings.tracker_max_age
         self._min_hits = min_hits or settings.tracker_min_hits
         self._min_confidence = min_confidence or settings.yolo_confidence
+        self._min_consecutive = 5
 
         self._tracker = sv.ByteTrack(
             track_activation_threshold=self._min_confidence,
             lost_track_buffer=self._max_age,
             minimum_matching_threshold=0.8,
-            minimum_consecutive_frames=5,
+            minimum_consecutive_frames=self._min_consecutive,
         )
         self._frame_count = 0
         logger.info(
@@ -83,7 +84,7 @@ class PersonTracker:
             track_activation_threshold=self._min_confidence,
             lost_track_buffer=self._max_age,
             minimum_matching_threshold=0.8,
-            minimum_consecutive_frames=5,
+            minimum_consecutive_frames=self._min_consecutive,
         )
         self._frame_count = 0
         logger.info("Tracker reset")

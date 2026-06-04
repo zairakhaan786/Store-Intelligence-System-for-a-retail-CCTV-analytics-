@@ -202,10 +202,13 @@ async def get_store_metrics(id: str, db: Session = Depends(get_db)):
     """
     try:
         # 1. Fetch transactions for this store to use for correlation
-        txs = db.execute(
-            text("SELECT order_date, order_time FROM transactions WHERE store_id = :store_id OR :store_id = 'all'"),
-            {"store_id": id}
-        ).fetchall()
+        try:
+            txs = db.execute(
+                text("SELECT order_date, order_time FROM transactions WHERE store_id = :store_id OR :store_id = 'all'"),
+                {"store_id": id}
+            ).fetchall()
+        except Exception:
+            txs = []
 
         tx_times = []
         for tx in txs:
@@ -369,10 +372,13 @@ async def get_store_funnel(id: str, db: Session = Depends(get_db)):
 
         # Purchase (Converted sessions)
         # Re-use the POS transaction correlation logic
-        txs = db.execute(
-            text("SELECT order_date, order_time FROM transactions WHERE store_id = :store_id OR :store_id = 'all'"),
-            {"store_id": id}
-        ).fetchall()
+        try:
+            txs = db.execute(
+                text("SELECT order_date, order_time FROM transactions WHERE store_id = :store_id OR :store_id = 'all'"),
+                {"store_id": id}
+            ).fetchall()
+        except Exception:
+            txs = []
 
         tx_times = []
         for tx in txs:

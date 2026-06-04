@@ -243,7 +243,23 @@ def ingest_sales_csv(csv_path: str, db_url: str | None = None) -> int:
             
     # Write to database using SQLAlchemy
     engine = create_engine(url)
-    df_filtered.to_sql("transactions", con=engine, if_exists="append", index=False)
+    
+    # SAFE: Check if table exists before querying
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    if "order_id" in df_filtered.columns and inspector.has_table("transactions"):
+        try:
+            existing_orders = pd.read_sql("SELECT order_id FROM transactions", engine)
+            existing_order_ids = set(existing_orders["order_id"])
+            if existing_order_ids:
+                df_filtered = df_filtered[~df_filtered["order_id"].isin(existing_order_ids)]
+                logger.info("Filtered existing duplicate orders", remaining_rows=len(df_filtered))
+        except Exception as e:
+            # Table might not exist yet, that's fine
+            pass
+
+    if len(df_filtered) > 0:
+        df_filtered.to_sql("transactions", con=engine, if_exists="append", index=False)
     
     logger.info("Sales CSV ingested successfully", rows=len(df_filtered))
     return len(df_filtered)

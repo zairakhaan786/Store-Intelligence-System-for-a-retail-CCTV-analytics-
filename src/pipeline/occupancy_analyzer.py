@@ -30,9 +30,16 @@ Edge cases:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
+
+try:
+    from scipy.ndimage import gaussian_filter
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    gaussian_filter = None
 
 from src.shared.logger import get_logger
 
@@ -99,21 +106,19 @@ class OccupancyAnalyzer:
             )
 
         # ── Build density grid using Gaussian kernels ─────────────────────
-        sigma_r = SIGMA_FRACTION * self._rows
-        sigma_c = SIGMA_FRACTION * self._cols
+        presence = np.zeros((self._rows, self._cols), dtype=np.float32)
 
         for cx, cy in centroids_norm:
             # Convert normalized coords to grid indices
             gc = min(int(cx * self._cols), self._cols - 1)
             gr = min(int(cy * self._rows), self._rows - 1)
-
-            # Add Gaussian kernel centered at this person
-            for r in range(self._rows):
-                for c in range(self._cols):
-                    dist_r = (r - gr) / sigma_r
-                    dist_c = (c - gc) / sigma_c
-                    density_grid[r, c] += np.exp(-0.5 * (dist_r**2 + dist_c**2))
-
+            presence[gr, gc] += 1.0
+            
+        sigma_px = SIGMA_FRACTION * max(self._rows, self._cols)
+        if SCIPY_AVAILABLE and sigma_px > 0:
+            density_grid = gaussian_filter(presence, sigma=sigma_px)
+        else:
+            density_grid = presence
         # Normalize to [0, 1]
         if density_grid.max() > 0:
             density_grid /= density_grid.max()
@@ -164,7 +169,7 @@ class OccupancyAnalyzer:
         result: OccupancyResult,
         width: int = 640,
         height: int = 480,
-        colormap: int = None,
+        colormap: Optional[int] = None,
     ) -> np.ndarray:
         """
         Convert density grid to a color heatmap image.

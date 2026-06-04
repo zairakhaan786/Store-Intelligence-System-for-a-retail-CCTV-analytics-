@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -46,6 +47,35 @@ FACE_INPUT_SIZE = (300, 300)
 FACE_MEAN = (104.0, 177.0, 123.0)
 
 
+def _download_file(url: str, dest: str) -> bool:
+    """Download a file from URL to destination path. Returns True on success."""
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        logger.info(f"Downloading {url} to {dest}")
+        urllib.request.urlretrieve(url, dest)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to download {url}: {e}")
+        return False
+
+
+def _ensure_face_models() -> bool:
+    """Download DNN face models if missing."""
+    if os.path.exists(PROTO_PATH) and os.path.exists(MODEL_PATH):
+        return True
+    
+    logger.warning("Face detection model files missing. Attempting download...")
+    proto_ok = _download_file(PROTO_URL, PROTO_PATH)
+    model_ok = _download_file(MODEL_URL, MODEL_PATH)
+    
+    if proto_ok and model_ok:
+        logger.info("Face models downloaded successfully")
+        return True
+    else:
+        logger.warning("Could not download DNN models. Will fall back to Haarcascade.")
+        return False
+
+
 @dataclass
 class FaceDetection:
     bbox_norm: Tuple[float, float, float, float]  # x1, y1, x2, y2 in [0,1]
@@ -53,22 +83,6 @@ class FaceDetection:
     track_id: Optional[str] = None
     anonymous_hash: Optional[str] = None   # SHA-256 of compressed face bytes
     is_staff: bool = False
-
-
-def _download_model_if_needed() -> bool:
-    """Download OpenCV DNN face model if not present."""
-    import urllib.request
-    os.makedirs(os.path.dirname(PROTO_PATH), exist_ok=True)
-
-    for url, path in [(PROTO_URL, PROTO_PATH), (MODEL_URL, MODEL_PATH)]:
-        if not os.path.exists(path):
-            logger.info(f"Downloading face model: {os.path.basename(path)}")
-            try:
-                urllib.request.urlretrieve(url, path)
-            except Exception as e:
-                logger.warning(f"Could not download {os.path.basename(path)}: {e}")
-                return False
-    return True
 
 
 class FaceDetector:
@@ -86,6 +100,8 @@ class FaceDetector:
         self._net = None
         self._detection_count = 0
         self._using_haarcascade = False
+        # Try to download models if needed
+        _ensure_face_models()
         logger.info("FaceDetector initialized", threshold=confidence_threshold)
 
     def _load_model(self) -> bool:
@@ -94,13 +110,16 @@ class FaceDetector:
             return True
 
         # Try DNN first
-        if _download_model_if_needed() and os.path.exists(MODEL_PATH):
+        if os.path.exists(PROTO_PATH) and os.path.exists(MODEL_PATH):
             try:
                 self._net = cv2.dnn.readNetFromCaffe(PROTO_PATH, MODEL_PATH)
                 logger.info("DNN face detector loaded")
                 return True
             except Exception as e:
                 logger.warning(f"DNN load failed: {e} — falling back to Haarcascade")
+        else:
+            logger.warning(f"DNN face model files not found at {PROTO_PATH} or {MODEL_PATH}.")
+            logger.warning("Falling back to Haarcascade.")
 
         # Fallback: OpenCV Haarcascade
         try:

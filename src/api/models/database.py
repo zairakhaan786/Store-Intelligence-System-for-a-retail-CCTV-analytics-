@@ -20,7 +20,6 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from src.shared.config import settings
@@ -68,7 +67,7 @@ class Camera(Base):
 class SessionModel(Base):
     __tablename__ = "sessions"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     track_id = Column(String(100), nullable=False)
     session_index = Column(Integer, default=0)
     entry_time = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -87,11 +86,11 @@ class SessionModel(Base):
 class EventModel(Base):
     __tablename__ = "events"
 
-    id = Column("id", UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column("id", String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     store_id = Column(String(50), default="STORE_BLR_002")
     camera_id = Column(String(50))
     visitor_id = Column(String(100))
-    session_id = Column(UUID(as_uuid=True))
+    session_id = Column(String(36))
     event_type = Column(String(50), nullable=False)
     timestamp = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     zone_id = Column(String(50))
@@ -121,7 +120,7 @@ class OccupancyModel(Base):
 class AnomalyModel(Base):
     __tablename__ = "anomalies"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     anomaly_type = Column(String(100), nullable=False)
     severity = Column(String(20), default="medium")
     zone_id = Column(String(50))
@@ -187,14 +186,24 @@ _SessionLocal = None
 def get_engine():
     global _engine
     if _engine is None:
-        _engine = create_engine(
-            settings.database_url,
-            pool_pre_ping=True,
-            pool_size=10,
-            max_overflow=20,
-            echo=False,
-        )
-        logger.info("Database engine created", url=settings.database_url.split("@")[-1])
+        db_url = settings.database_url
+        if db_url.startswith("sqlite"):
+            _engine = create_engine(
+                db_url,
+                connect_args={"check_same_thread": False},
+                echo=False,
+            )
+        else:
+            _engine = create_engine(
+                db_url,
+                pool_pre_ping=True,
+                pool_size=10,
+                max_overflow=20,
+                echo=False,
+            )
+        # Auto-create all tables
+        Base.metadata.create_all(bind=_engine)
+        logger.info("Database engine created", url=db_url.split("@")[-1] if "@" in db_url else db_url)
     return _engine
 
 

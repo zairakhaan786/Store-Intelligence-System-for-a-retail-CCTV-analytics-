@@ -1,6 +1,9 @@
 """
-Tests for the detection pipeline components.
+Tests for detection and pipeline parsing edge cases.
 Tests run without GPU using mock detections.
+
+# PROMPT: Generate pytest unit tests for the detection pipeline logic. Focus on validating the spatial Point-in-Polygon zone calculations and edge case handling around corrupted frames or empty bounding boxes.
+# CHANGES MADE: No major changes made. The AI-generated tests cleanly caught the required validation logic.
 """
 from __future__ import annotations
 

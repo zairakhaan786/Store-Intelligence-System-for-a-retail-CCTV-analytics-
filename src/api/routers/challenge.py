@@ -215,7 +215,7 @@ async def get_store_metrics(id: str, db: Session = Depends(get_db)):
             try:
                 # transactions table stores date and time as strings
                 dt_str = f"{tx.order_date} {tx.order_time}"
-                dt = datetime.strptime(dt_str, "%d-%m-%4Y %H:%M:%S")
+                dt = datetime.strptime(dt_str, "%d-%m-%Y %H:%M:%S")
                 # fallback for other date format
             except Exception:
                 try:
@@ -384,7 +384,7 @@ async def get_store_funnel(id: str, db: Session = Depends(get_db)):
         for tx in txs:
             try:
                 dt_str = f"{tx.order_date} {tx.order_time}"
-                dt = datetime.strptime(dt_str, "%d-%m-%4Y %H:%M:%S")
+                dt = datetime.strptime(dt_str, "%d-%m-%Y %H:%M:%S")
             except Exception:
                 try:
                     dt = datetime.strptime(f"{tx.order_date} {tx.order_time}", "%Y-%m-%d %H:%M:%S")

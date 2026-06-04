@@ -94,6 +94,7 @@ class ReEntryHandler:
             (original_track_id, new_session_index) if re-entry detected, else None
         """
         now = time.time()
+        self._purge_stale(camera_id)
         candidates = self._exit_records.get(camera_id, [])
         best_match: Optional[ExitRecord] = None
         best_iou = 0.0

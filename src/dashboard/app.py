@@ -146,7 +146,7 @@ st.sidebar.markdown(
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_metrics() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/metrics", timeout=10)
+        r = httpx.get(f"{API_BASE}/metrics", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -156,7 +156,7 @@ def fetch_metrics() -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_funnel() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/funnel", timeout=10)
+        r = httpx.get(f"{API_BASE}/metrics/funnel", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -176,10 +176,9 @@ def fetch_events(page: int = 1, page_size: int = 100) -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_anomalies() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/anomalies", timeout=10)
+        r = httpx.get(f"{API_BASE}/anomalies", timeout=10)
         r.raise_for_status()
-        # Since it returns a list, wrap in dict for compatibility
-        return {"anomalies": r.json(), "total": len(r.json()), "active_count": len(r.json())}
+        return r.json()
     except Exception as e:
         return {"error": str(e), "anomalies": [], "total": 0, "active_count": 0}
 
@@ -197,7 +196,7 @@ def fetch_occupancy() -> dict:
 @st.cache_data(ttl=REFRESH_INTERVAL)
 def fetch_heatmap() -> dict:
     try:
-        r = httpx.get(f"{API_BASE}/stores/STORE_BLR_002/heatmap", timeout=10)
+        r = httpx.get(f"{API_BASE}/metrics/heatmap", timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
@@ -238,16 +237,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-    if st.sidebar.button("🌱 Seed Data", use_container_width=True):
-        try:
-            r = httpx.post(f"{API_BASE}/pipeline/seed?n_visitors=127", timeout=30)
-            if r.status_code == 200:
-                st.sidebar.success("Database seeded with synthetic data!")
-                st.rerun()
-            else:
-                st.sidebar.error("Seeding disabled or failed.")
-        except Exception as e:
-            st.sidebar.error(str(e))
+
 
     st.sidebar.divider()
     st.markdown("### 🎥 Upload CCTV Video")
@@ -265,7 +255,39 @@ with st.sidebar:
                     if r.status_code == 200:
                         res = r.json()
                         st.success("✅ Video uploaded successfully!")
-                        st.info("The AI pipeline is now running in the background. Check logs or wait a bit, then refresh.")
+                        progress_bar = st.progress(0.0, text="Initializing AI pipeline...")
+                        import time
+                        
+                        while True:
+                            try:
+                                status_req = httpx.get(f"{API_BASE}/pipeline/status", timeout=10)
+                                if status_req.status_code == 200:
+                                    status_data = status_req.json().get("status", {})
+                                    
+                                    if not status_data.get("running", False) and status_data.get("message") != "Starting AI pipeline...":
+                                        # It might be idle right after start or completed. 
+                                        # Wait a bit or if total_frames > 0 it's done.
+                                        if status_data.get("total_frames", 0) > 0:
+                                            progress_bar.progress(1.0, text="✅ Processing complete!")
+                                            time.sleep(1)
+                                            break
+                                    
+                                    processed = status_data.get("frames_processed", 0)
+                                    total = status_data.get("total_frames", 1)
+                                    msg = status_data.get("message", "Processing...")
+                                    
+                                    if total > 0:
+                                        pct = min(processed / total, 1.0)
+                                        progress_bar.progress(pct, text=f"{msg} ({processed}/{total} frames)")
+                                    else:
+                                        progress_bar.progress(0.0, text=msg)
+                                        
+                            except Exception as e:
+                                pass # Ignore transient network errors during polling
+                                
+                            time.sleep(1)
+                            
+                        st.rerun()
                     else:
                         st.error(f"Failed: {r.status_code} - {r.text}")
                 except Exception as e:
@@ -305,19 +327,17 @@ with tab1:
         st.info("💡 Make sure the API is running at `" + API_BASE + "` and a CCTV video has been uploaded.")
     else:
         unique_visitors = metrics_data.get('unique_visitors', 0)
-        total_entries = int(unique_visitors * 1.13) if unique_visitors > 0 else 0
+        total_entries = metrics_data.get('total_entries', 0)
         
-        avg_dwells = list(metrics_data.get("avg_dwell_per_zone", {}).values())
-        dwell_min = round(sum(avg_dwells)/len(avg_dwells)/60, 1) if avg_dwells else 0
+        avg_dwell_sec = metrics_data.get('avg_dwell_seconds', 0)
+        dwell_min = round(avg_dwell_sec / 60, 1)
         
         conv = metrics_data.get("conversion_rate", 0)
-        
-        anomalies_res = fetch_anomalies()
-        anomalies_count = len(anomalies_res) if not isinstance(anomalies_res, dict) else 0
+        anomalies_count = metrics_data.get("anomaly_count", 0)
 
-        active_now = metrics_data.get('queue_depth', 0) * 2 + 1 if unique_visitors > 0 else 0
-        re_entries = total_entries - unique_visitors
-        group_entries = int(unique_visitors * 0.08)
+        active_now = metrics_data.get('active_sessions', 0)
+        re_entries = metrics_data.get('reentry_count', 0)
+        group_entries = metrics_data.get('group_entry_count', 0)
 
         st.markdown(
             f"""
@@ -474,7 +494,7 @@ with tab3:
 
         for cell in cells:
             zid = cell["zone_id"]
-            heat = cell["visit_frequency"] / 100.0  # Normalized to 0-1
+            heat = cell["heat_value"]
             if zid in zone_bounds:
                 x0, y0, x1, y1 = zone_bounds[zid]
                 r = int(124 + heat * 131)
@@ -485,7 +505,7 @@ with tab3:
                               fillcolor=color, line=dict(color="#7c3aed", width=1))
                 fig.add_annotation(
                     x=(x0 + x1) / 2, y=(y0 + y1) / 2,
-                    text=f"<b>{zid}</b><br>{cell['visit_frequency']}% frequency",
+                    text=f"<b>{zid}</b><br>{cell['visit_count']} visits<br>Dwell: {cell['avg_dwell']:.1f}s",
                     showarrow=False, font=dict(color="white", size=10),
                 )
 
@@ -501,11 +521,11 @@ with tab3:
         st.plotly_chart(fig, use_container_width=True)
 
         st.dataframe(
-            df_heat[["zone_id", "visit_frequency", "avg_dwell_seconds"]].rename(
+            df_heat[["zone_id", "visit_count", "avg_dwell"]].rename(
                 columns={
-                    "zone_id": "Zone ID",
-                    "visit_frequency": "Visit Frequency (%)",
-                    "avg_dwell_seconds": "Avg Dwell (s)",
+                    "zone_id": "Zone",
+                    "visit_count": "Visits",
+                    "avg_dwell": "Avg Dwell (s)"
                 }
             ),
             use_container_width=True,

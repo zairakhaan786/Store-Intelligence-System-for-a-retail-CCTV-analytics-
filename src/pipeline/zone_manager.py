@@ -140,7 +140,7 @@ class ZoneManager:
         px, py = polygon[-1]
         for i in range(n):
             cx, cy = polygon[i]
-            if ((cy > y) != (py > y)) and (x < (px - cx) * (y - cy) / (py - cy + 1e-10) + cx):
+            if ((cy > y) != (py > y)) and (x < (px - cx) * (y - cy) / ((py - cy) if py != cy else 1e-10) + cx):
                 inside = not inside
             px, py = cx, cy
         return inside

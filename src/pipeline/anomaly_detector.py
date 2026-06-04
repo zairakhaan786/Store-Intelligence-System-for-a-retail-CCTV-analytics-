@@ -172,6 +172,7 @@ class AnomalyDetector:
             return []
         entries = self._recent_entries.get(zone_id, [])
         if len(entries) >= 2:
+            self._recent_entries[zone_id].clear()
             return [AnomalyEvent(
                 anomaly_type="tailgating",
                 severity="low",
